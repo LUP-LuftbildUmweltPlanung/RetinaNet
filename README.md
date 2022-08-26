@@ -4,8 +4,8 @@ A DeepLearning Architecture for image detection.
 
 ## Description
 
-This repository contains the code necessary to run a RetinaNet based on the [DeepForest](https://github.com/weecology/DeepForest) implementation. 
-The implementation use the PyTorch DeepLearning framework. RetinaNet is used to detect objects within an image.
+This repository contains the code necessary to run a [RetinaNet](https://arxiv.org/abs/1708.02002) based on the [DeepForest](https://github.com/weecology/DeepForest) implementation. 
+The implementation uses the PyTorch DeepLearning framework. RetinaNet is used to detect objects within an image.
 The repository contains all code necessary to preprocess large tif-images, run training and validation, and perform predictions using the trained models.
 
 ## Getting Started
