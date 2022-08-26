@@ -20,8 +20,10 @@ The repository contains all code necessary to preprocess large tif-images, run t
 ### Installation
 
 * clone the Stable RetinaNet repository
+* conda create --name RetinaNet python==3.9.6
+* conda activate RetinaNet
 * cd ../RetinaNet/environment
-* conda env create -f retinanet.yml
+* pip install -r requirements.txt
 
 ### Executing program
 
