@@ -303,8 +303,8 @@ if __name__ == '__main__':
                      patch_overlap=patch_overlap, split=split, seed=seed)
 
     if Train:
-        r.train(end_model=end_model, annotations_file=annotations_file, epochs=EPOCHS, label_dict=label_dict,
-                multi_class=multi_class,
+
+        r.train(end_model=end_model, annotations_file=annotations_file, epochs=EPOCHS, label_dict=label_dict, multi_class=multi_class,
                 batch_size=BATCH_SIZE, checkpoint_frequency=CHECKPOINT_FREQUENCY, lr=LEARNING_RATE)
 
     if Validate:
