@@ -8,14 +8,15 @@ Created on Fri Jul 30 11:59:17 2021
 import glob
 import os
 import warnings
-import pandas as pd
 from pathlib import Path
 
+import pandas as pd
+
 from data import preprocess_data, annotations_split, annotations_merge
+from params import *
 from predict import predict_in_tiles
 from train import train_model
 from validate import validate, visualize_validation
-from params import *
 
 
 class RetinaNet:
@@ -31,6 +32,7 @@ class RetinaNet:
                 validate_all:       validates all models in a folder and provides a comparison
                 predict:            predicts on a given image using a provided model
     """
+
     def __init__(self):
         self.csv = None
         self.path = None
@@ -296,19 +298,24 @@ if __name__ == '__main__':
         score_threshold = 0.05
 
     if Create_tiles:
-        r.preprocess(annotations, image_path, directory_to_save_crops, patch_size=patch_size,
+        r.preprocess(annotations=annotations, image_path=image_path, directory_to_save_crops=directory_to_save_crops,
+                     patch_size=patch_size,
                      patch_overlap=patch_overlap, split=split, seed=seed)
 
     if Train:
+
         r.train(end_model=end_model, annotations_file=annotations_file, epochs=EPOCHS, label_dict=label_dict, multi_class=multi_class,
                 batch_size=BATCH_SIZE, checkpoint_frequency=CHECKPOINT_FREQUENCY, lr=LEARNING_RATE)
 
     if Validate:
         if vali_model.endswith('.pl'):
-            r.validate(annotations_file, vali_model, multi_class, label_dict, save=save)
+            r.validate(annotations_file=annotations_file, predict_model=vali_model, multi=multi_class,
+                       label_dict=label_dict, save=save)
         else:
-            r.validate_all(annotations_file, vali_model, multi_class, label_dict, save=save)
+            r.validate_all(annotations_file=annotations_file, predict_model_folder=vali_model, multi=multi_class,
+                           label_dict=label_dict, save=save)
 
     if Predict:
-        r.predict(image_file, output_shape, predict_model, multi_class, label_dict=label_dict,
+        r.predict(image_file=image_file, output_shape=output_shape, predict_model=predict_model, multi=multi_class,
+                  label_dict=label_dict,
                   patch_size=patch_size, patch_overlap=patch_overlap, score_threshold=score_threshold)
