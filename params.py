@@ -3,7 +3,7 @@ Create_tiles = False
 Train = True
 Validate = False
 Predict = False
-#
+
 # General
 patch_size = 400
 patch_overlap = 0.3
