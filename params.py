@@ -10,6 +10,7 @@ patch_overlap = 0.3
 label_dict = {'Kiefer': 0}
 multi_class = True
 
+print("a")
 # DATA CREATION
 annotations = "C:/Path/to/annotations.shp"
 image_path = "C:/Path/to/image" or r"C:/Path/to/image/folder"
