@@ -34,7 +34,7 @@ The repository contains all code necessary to preprocess large tif-images, run t
 
 ## Description
 
-Tree Crown Delineation is 
+Tree Crown Delineation is a method used in remote sensing and forestry to identify and outline the crowns (the top parts) of individual trees in aerial or satellite images. This is crucial for estimating forest structure, health, biodiversity, and carbon storage. 
 
 ### Installation
 
@@ -42,6 +42,7 @@ Tree Crown Delineation is
 * `conda create -n UNet`
 * `conda activate UNet`
 * `conda install gdal pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia`
+* `pip install git+https://git@github.com/AWF-GAUG/TreeCrownDelineation.git`
 * `cd ../RetinaNet/environment`
 * `pip install -r requirements_2.txt`
 
