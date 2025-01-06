@@ -30,6 +30,21 @@ The repository contains all code necessary to preprocess large tif-images, run t
 
 * set parameters and run main.py
 
+# UNet Segmentation
+
+## Description
+
+Tree Crown Delineation is 
+
+### Installation
+
+* clone the Stable RetinaNet repository
+* `conda create -n UNet`
+* `conda activate UNet`
+* `conda install gdal pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia`
+* `cd ../RetinaNet/environment`
+* `pip install -r requirements_2.txt`
+
 ## Help/Known Issues
 
 * None yet
