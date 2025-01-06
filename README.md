@@ -20,15 +20,15 @@ The repository contains all code necessary to preprocess large tif-images, run t
 ### Installation
 
 * clone the Stable RetinaNet repository
-* `conda create --name RetinaNet python==3.9.6`
+* `conda create -n RetinaNet python=3.11`
 * `conda activate RetinaNet`
+* `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118`
 * `cd ../RetinaNet/environment`
 * `pip install -r requirements.txt`
 
 ### Executing program
 
-* set parameters in params.py
-* run main_retinanet.py
+* set parameters and run main.py
 
 ## Help/Known Issues
 
@@ -36,8 +36,10 @@ The repository contains all code necessary to preprocess large tif-images, run t
 
 ## Authors
 
-* Benjamin Stöckigt
-* Malik-Manel Hashim
+* [Benjamin Stöckigt](https://github.com/benjaminstoeckigt)
+* [Shadi Ghantous](https://github.com/Shadiouss)
+* [Malik-Manel Hashim](https://github.com/irukandi)
+  
 
 ## Version History
 

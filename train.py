@@ -1,103 +1,93 @@
-import os
-import json
-import torch
-import pandas as pd
-from deepforest import main
-from pathlib import Path
+from train_utils import (
+    preprocess_data,
+    initialize_model,
+    initialize_trainer,
+    get_train_transform,
+    get_validation_transform,
+)
+import subprocess
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 
-def train_model(start_model, end_model, annotations_file, gpu=True, epochs=30, lr=0.0001, batch_size=1,
-                multi_class=False, checkpoint_frequency=None, label_dict=None):
+def run_train(args_train):
     """
-    Trains a model on data provided in the annotations file.
+    Main function to execute the training pipeline.
 
-                Keyword arguments
-                -----------------
-                end_model:          Name of the stored model file
-                annotations_file:   Annotations file to be used for training (default=None -> looks in self.csv)
-                start_model:        If provided, the start model will be trained further. Otherwise, a new model is
-                                    created (default=None -> new model)
-                gpu:                If a GPU should be used for training (default=True)
-                epochs:             Epochs to be trained for (default=10)
-                lr:                 Learning rate to be used when the model is updates (default=0.0001)
-                batch_size:         Amount of single files to be trained on at the same time (default=4)
-                multi_class:        If the annotations file contains more than one class (default=False)
+    Args:
+        args_train (dict): Dictionary containing training arguments.
     """
+    # Log all training arguments at the start
+    print("Training Arguments:")
+    for key, value in args_train.items():
+        print(f"{key}: {value}")
+    print("\n")
 
-    if start_model is not None:
-        # reload the checkpoint to model object
-        if not multi_class:
-            m = main.deepforest.load_from_checkpoint(start_model)
-        else:
-            m = main.deepforest(num_classes=len(label_dict), label_dict=label_dict)
-            if gpu:
-                m.to("cuda")
-            else:
-                m.to("cpu")
-            ckpt = torch.load(start_model, map_location=torch.device("cuda" if gpu else "cpu"))
-            m.load_state_dict(ckpt["state_dict"])
-    else:
-        if not multi_class:
-            m = main.deepforest()
-            m.use_release()
-        else:
-            if label_dict is None:
-                data = pd.read_csv(annotations_file)
-                classes = sorted(set(data['label']))
-                num_classes = len(classes)
-                assert num_classes > 1, "Annotations do not contain multiple classes. Please disable multi_class."
-                label_dict = {cla: idx for idx, cla in enumerate(classes)}
+    # Step 1: Preprocessing
+    print("Preprocessing data with the following parameters:")
+    print(f"Train CSV: {args_train['train_csv']}")
+    print(f"Validation CSV: {args_train['val_csv']}")
+    print(f"Default Label: {args_train.get('default_label', 'Tree')}")
+    preprocess_data(
+        args_train["train_csv"],
+        args_train["val_csv"],
+        default_label=args_train.get("default_label", "Tree"),
+    )
+    print("Data preprocessing completed.\n")
 
-            label_dir = os.path.dirname(end_model) + r"\label_dictionary"
-            file_name = os.path.basename(end_model)[:-3]
+    # Step 2: Model and Transformations
+    print("Initializing model and transformations...")
 
-            Path(label_dir).mkdir(parents=True, exist_ok=True)
+    # Custom training and validation transformations
+    args_train["train_transform"] = get_train_transform()
+    print("Train Transform:")
+    print(args_train["train_transform"])
 
-            with open(label_dir + '\\' + file_name + '.txt', 'w') as file:
-                file.write(json.dumps(label_dict))
+    args_train["val_transform"] = get_validation_transform()
+    print("Validation Transform:")
+    print(args_train["val_transform"])
 
-            print("Automatically created label dictionary: ", label_dict)
-            print("Dictionary saved as: " + label_dir + '\\' + file_name + '.txt')
+    # Initialize the model
+    model = initialize_model(args_train)
+    print("Model Initialization Details:")
+    print(f"Model Type: {args_train.get('model_type', 'DeepForest')}")
+    print(f"Learning Rate: {args_train['learning_rate']}")
+    print(f"Optimizer Type: {args_train['optimizer_type']}")
+    print(f"Number of Classes: {args_train.get('num_classes', 'Not Specified')}")
+    print("Model initialization completed.\n")
 
-            m = main.deepforest(num_classes=len(label_dict), label_dict=label_dict)
+    # Step 3: Trainer
+    print("Initializing trainer...")
+    trainer = initialize_trainer(args_train)
+    print("Trainer Initialization Details:")
+    print(f"Checkpoint Directory: {args_train['model_save_dir']}")
+    print(f"TensorBoard Log Directory: {args_train['tb_log_dir']}")
+    print(f"Monitored Metric: {args_train['monitor']}")
+    print(f"Validation Frequency: {args_train['valid_every_n_epochs']} epoch(s)")
+    print("Trainer initialization completed.\n")
 
-    if gpu:
-        m.to("cuda")
-    else:
-        m.to("cpu")
-        # import multiprocessing
-        # m.config["workers"] = multiprocessing.cpu_count()-1
-        m.config["workers"] = 1
-    m.config["gpus"] = 1 if gpu else 0
-    m.config["save-snapshot"] = False
-    m.config["train"]["csv_file"] = annotations_file
-    m.config["train"]["root_dir"] = os.path.dirname(annotations_file)
-    # model.config["train"]["fast_dev_run"] = True
-    m.config["train"]["epochs"] = epochs
-    m.config["train"]["lr"] = lr
-    m.config["train"]["batch_size"] = batch_size
+    # Step 4: TensorBoard
+    print("Starting TensorBoard...")
+    log_dir = args_train["tb_log_dir"]
+    tensorboard_port = args_train["tensorboard_port"]
+    try:
+        subprocess.Popen(["tensorboard", "--logdir", log_dir, "--port", str(tensorboard_port)])
+        print(f"TensorBoard is running. Access it at http://localhost:{tensorboard_port}\n")
+    except Exception as e:
+        print(f"Failed to start TensorBoard: {e}\n")
 
-    if checkpoint_frequency is None:
-        m.create_trainer()
-        m.trainer.fit(m)
-        m.trainer.save_checkpoint(end_model)
-    else:
-        checkpoint = 0
-        m.config["train"]["epochs"] = checkpoint_frequency
-        m.create_trainer()
-        model_name = end_model.split('.', 1)[0]
-        while checkpoint_frequency * checkpoint < epochs:
-            print(f'Started episode {checkpoint_frequency * checkpoint + 1}.')
-            end_model = model_name + f'_{checkpoint_frequency * (checkpoint + 1)}.pl'
-            m.create_trainer()
-            m.trainer.fit(m)
-            m.trainer.save_checkpoint(end_model)
-            checkpoint += 1
-            print(f'Finished episode {checkpoint_frequency * checkpoint}.\n')
+    # Step 5: Training
+    print("Starting training...")
+    try:
+        trainer.fit(model)
+        print("Training completed successfully!\n")
+    except Exception as e:
+        print(f"Error during training: {e}\n")
 
-        if checkpoint * checkpoint_frequency < epochs:
-            end_model = model_name + f'_{epochs}.pl'
-            m.config["train"]["epochs"] = epochs - checkpoint_frequency * checkpoint
-            m.create_trainer()
-            m.trainer.fit(m)
-            m.trainer.save_checkpoint(end_model)
+    # Step 6: Save Final Checkpoint
+    print("Saving the final checkpoint...")
+    final_checkpoint_path = f"{args_train['model_save_dir']}/final_model_checkpoint.ckpt"
+    try:
+        trainer.save_checkpoint(final_checkpoint_path)
+        print(f"Final model checkpoint saved at: {final_checkpoint_path}\n")
+    except Exception as e:
+        print(f"Failed to save the final checkpoint: {e}\n")
