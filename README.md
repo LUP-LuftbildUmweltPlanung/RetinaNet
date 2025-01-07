@@ -17,7 +17,9 @@ A model for individual Tree Crown Delineation via Neural Networks.
 
   ![UNet Detection](./Img/object_detect.webp)
 
-Scripts:
+
+## Scripts:
+
 - `deepforest_main.py`: Runs the DeepForest model for tree detection.
 - `delineation_main.py`: Runs the UNet-based model for crown delineation.
 
