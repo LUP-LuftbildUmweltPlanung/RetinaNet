@@ -90,26 +90,6 @@ Scripts:
 - [RetinaNet paper](https://arxiv.org/abs/1708.02002)
 - [Tree Crown Delineation](https://github.com/AWF-GAUG/TreeCrownDelineation)
 
----
-Here’s the updated README with the images included. I'll assume you'd like to place each image after the description of its respective model.
-
----
-
-# Tree Detection and Crown Delineation Models
-
-## Description
-
-This repository provides implementations for two deep learning models used in remote sensing and forestry:
-
-1. **DeepForest**: A model for tree detection using a RetinaNet-based architecture.
-   
-
-
-2. **UNet Detection**: A model for object detection and delineation of individual tree crowns.
-
-
-
-
 
 
 
