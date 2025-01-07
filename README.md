@@ -1,19 +1,5 @@
 # Forest Object Detection Models
 
-A DeepLearning Architecture for image detection.
-
-## Description
-
-This repository contains the code necessary to run a [RetinaNet](https://arxiv.org/abs/1708.02002) based on the [DeepForest](https://github.com/weecology/DeepForest) implementation. 
-The implementation uses the PyTorch DeepLearning framework. RetinaNet is used to detect objects within an image.
-The repository contains all code necessary to preprocess large tif-images, run training and validation, and perform predictions using the trained models.
-
-Here’s an improved and more concise version of your README file addressing your concerns:
-
----
-
-# Tree Detection and Crown Delineation Models
-
 ## Description
 
 This repository provides implementations for two deep learning models used in remote sensing and forestry:
