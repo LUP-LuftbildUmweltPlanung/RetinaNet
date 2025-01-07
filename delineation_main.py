@@ -1,6 +1,13 @@
+# import library
 import subprocess
 
+# Please define the Parameters:
+input_file = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\dop1.tif" #  the image which we want to predict
+output_file = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\output_file_last_script" # the output prediction folder (the last part the name of the file)
+model_path = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\Models\Unet-resnet18_epochs=209_lr=0.0001_width=224_bs=32_divby=255_custom_color_augs_k=2_jitted.pt" # path to the model
+save_prediction = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\ndvi_map_last_script" # the name of ndvi file and whole path (the last part the name of the file)
 
+# function to run inference file
 def run_inference(input_file, output_file, model_path, save_prediction, red_channel, nir_channel, divide_by,
                   rescale_ndvi=False, additional_args=None):
     """
@@ -49,11 +56,11 @@ def run_inference(input_file, output_file, model_path, save_prediction, red_chan
 
 
 if __name__ == "__main__":
-    # Example usage
-    input_file = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\dop1.tif"
-    output_file = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\output_file_last_script"
-    model_path = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\Models\Unet-resnet18_epochs=209_lr=0.0001_width=224_bs=32_divby=255_custom_color_augs_k=2_jitted.pt"
-    save_prediction = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\ndvi_map_last_script"
+    # Variables
+    input_file = input_file
+    output_file = output_file
+    model_path = model_path
+    save_prediction = save_prediction
     red_channel = 0
     nir_channel = 3
     divide_by = 255
@@ -67,7 +74,7 @@ if __name__ == "__main__":
         "--simplify", "0.1"     # Simplify geometries or results with a specified tolerance (e.g., 0.1 for simplification).
     ]
 
-
+    # run the function
     run_inference(
         input_file=input_file,
         output_file=output_file,
