@@ -1,4 +1,4 @@
-# Forest Object Detection Models
+# Object Detection Models
 
 ## Description
 
