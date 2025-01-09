@@ -203,7 +203,7 @@ def initialize_trainer(args):
     if args["early_stop"]:
         trainer = Trainer(
             max_epochs=args["epochs"],
-            # check_val_every_n_epoch=args["check_val_every_n_epoch"],
+            check_val_every_n_epoch=None,
             callbacks=[checkpoint_callback, IOULogger(), EarlyStopping(
                 monitor=monitor,
                 patience=args["optimizer_patience"],
