@@ -10,10 +10,10 @@ This repository provides implementations for two deep learning models used in re
    
 A model for tree detection using a RetinaNet-based architecture. This repository contains the code necessary to run a [RetinaNet](https://arxiv.org/abs/1708.02002) based on the [DeepForest](https://github.com/weecology/DeepForest) implementation. 
 The implementation uses the PyTorch DeepLearning framework. RetinaNet is used to detect objects within an image. The repository contains all code necessary to preprocess large tif-images, run training and validation, and perform predictions using the trained models.
-
+DeepForest uses deep learning object detection networks to predict bounding boxes corresponding to individual trees in RGB imagery.
 ### 3. **[UNet Detection](https://github.com/AWF-GAUG/TreeCrownDelineation)** 
 
-A model for individual Tree Crown Delineation via Neural Networks.
+A model for individual Tree Crown Delineation via Neural Networks in RGB or RGB-NIR imagery if you want to append the NDVI.
 
   ![UNet Detection](./Img/object_detect.webp)
 
