@@ -49,7 +49,7 @@ A model for individual Tree Crown Delineation via Neural Networks.
    conda create -n DeepForest python=3.11
    conda activate DeepForest
    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-   cd ../UNet/environment
+   cd ../ObjectDetection/environment
    pip install -r requirements.txt
    ```
 
@@ -59,7 +59,7 @@ A model for individual Tree Crown Delineation via Neural Networks.
    conda activate UNet
    conda install gdal pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
    pip install git+https://git@github.com/AWF-GAUG/TreeCrownDelineation.git
-   cd ../UNet/environment
+   cd ../ObjectDetection/environment
    pip install -r requirements_2.txt
    ```
 ---
