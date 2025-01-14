@@ -82,6 +82,11 @@ def run_predict(args_predict):
     model_path = args_predict["model_path"]
     model = main.deepforest.load_from_checkpoint(model_path)  # Load the model once
 
+    # Force NMS threshold override
+    model.config["nms_thresh"] = args_predict["iou_threshold"]  # Overwrite config
+    model.nms_thresh = args_predict["iou_threshold"]  # Overwrite model attribute
+    print(f"Forced NMS threshold: {model.nms_thresh}")
+
     process_all_tif_files_in_folder(
         model=model,
         folder_path=args_predict["folder_path"],
