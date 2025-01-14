@@ -69,7 +69,6 @@ args_predict = {
     "small_tiles": True,  # Whether to use tile-based prediction for large images, False if the image is small 
     "patch_size": 400,    # Size of each tile used during prediction
     "patch_overlap": 0.15,  # Overlap percentage between adjacent tiles
-    "iou_threshold": 0.4,   # Intersection over Union (IoU) threshold for filtering predictions
     "thresh": 0.4  # Confidence score threshold for filtering predictions
 }
 
@@ -83,8 +82,8 @@ def run_predict(args_predict):
     model = main.deepforest.load_from_checkpoint(model_path)  # Load the model once
 
     # Force NMS threshold override
-    model.config["nms_thresh"] = args_predict["iou_threshold"]  # Overwrite config
-    model.nms_thresh = args_predict["iou_threshold"]  # Overwrite model attribute
+    model.config["nms_thresh"] = args_predict["thresh"]  # Overwrite config
+    model.nms_thresh = args_predict["thresh"]  # Overwrite model attribute
     print(f"Forced NMS threshold: {model.nms_thresh}")
 
     process_all_tif_files_in_folder(
@@ -94,7 +93,6 @@ def run_predict(args_predict):
         small_tiles=args_predict["small_tiles"],
         patch_size=args_predict["patch_size"],
         patch_overlap=args_predict["patch_overlap"],
-        iou_threshold=args_predict["iou_threshold"],
         thresh=args_predict["thresh"]
     )
 
