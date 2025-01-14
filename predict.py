@@ -22,8 +22,72 @@ from deepforest import main, dataset, visualize, utilities
 from deepforest import predict as predict_utils
 
 
+# used just if im_memory: False
+class RasterDataset:
+    """Dataset for predicting on raster windows.
+
+    Args:
+        raster_path (str): Path to raster file
+        patch_size (int): Size of windows to predict on
+        patch_overlap (float): Overlap between windows as fraction (0-1)
+    Returns:
+        A dataset of raster windows
+    """
+
+    def __init__(self, raster_path, patch_size, patch_overlap):
+        self.raster_path = raster_path
+        self.patch_size = patch_size
+        self.patch_overlap = patch_overlap
+
+        # Get raster shape without keeping file open
+        with rio.open(raster_path) as src:
+            width = src.shape[0]
+            height = src.shape[1]
+
+            # Check is tiled
+            if not src.is_tiled:
+                raise ValueError(
+                    "Out-of-memory dataset is selected, but raster is not tiled, "
+                    "leading to entire raster being read into memory and defeating "
+                    "the purpose of an out-of-memory dataset. "
+                    "\nPlease run: "
+                    "\ngdal_translate -of GTiff -co TILED=YES <input> <output> "
+                    "to create a tiled raster")
+        # Generate sliding windows
+        self.windows = slidingwindow.generateForSize(
+            height,
+            width,
+            dimOrder=slidingwindow.DimOrder.ChannelHeightWidth,
+            maxWindowSize=patch_size,
+            overlapPercent=patch_overlap)
+        self.n_windows = len(self.windows)
+
+    def __len__(self):
+        return self.n_windows
+
+    def __getitem__(self, idx):
+        """Get a window of the raster.
+
+        Args:
+            idx (int): Index of window to get
+
+        Returns:
+            crop (torch.Tensor): A tensor of shape (3, height, width)
+        """
+        window = self.windows[idx]
+
+        # Open, read window, and close for each operation
+        with rio.open(self.raster_path) as src:
+            window_data = src.read(window=Window(window.x, window.y, window.w, window.h))
+
+        # Convert to torch tensor and rearrange dimensions
+        window_data = torch.from_numpy(window_data).float()  # Convert to torch tensor
+        window_data = window_data / 255.0  # Normalize
+
+        return window_data  # Already in (C, H, W) format from rasterio
 
 
+# Merge predicted tiles:
 def mosiac(boxes, windows, sigma=0.5, thresh=0.001, iou_threshold=0.1):
     """
     Merge predictions from overlapping windows by transforming their coordinates
@@ -226,7 +290,7 @@ def predict_tile(
     else:
         if raster_path is None:
             raise ValueError("raster_path is required if in_memory is False.")
-        ds = dataset.RasterDataset(
+        ds = RasterDataset(
             raster_path=raster_path,
             patch_overlap=patch_overlap,
             patch_size=patch_size,
