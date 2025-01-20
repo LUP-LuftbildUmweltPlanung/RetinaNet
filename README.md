@@ -2,7 +2,7 @@
 
 ## Description
 
-This repository provides implementations for two deep learning models used in remote sensing and forestry:
+This repository provides implementations for two deep learning models used in object_detection:
 
 ### 1. **[DeepForest](https://github.com/weecology/DeepForest)** 
 
