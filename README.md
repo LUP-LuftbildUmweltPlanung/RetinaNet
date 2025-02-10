@@ -44,7 +44,7 @@ A model for individual Tree Crown Delineation via Neural Networks in RGB or RGB-
 
 2. Create and activate environments:
 
-   For **DeepForest**:
+   For **DeepForest** Windows:
    ```bash
    conda create -n DeepForest python=3.11
    conda activate DeepForest
@@ -52,8 +52,16 @@ A model for individual Tree Crown Delineation via Neural Networks in RGB or RGB-
    cd ../ObjectDetection/environment
    pip install -r requirements.txt
    ```
+   For **DeepForest** Linux:
+   ```bash
+   conda create -n DeepForest python=3.11
+   conda activate DeepForest
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+   cd ../ObjectDetection/environment
+   pip install -r requirements_linux.txt
+   ```
 
-   For **UNet Detection**:
+   For **UNet Detection** Windows:
    ```bash
    conda create -n UNet python=3.11
    conda activate UNet
