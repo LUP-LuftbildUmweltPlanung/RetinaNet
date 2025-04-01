@@ -10,19 +10,114 @@ import numpy as np
 import pandas as pd
 import rasterio as rio
 import torch
+import mlflow
 from torch import cuda
-import geopandas as gpd
 import rasterio
+from rasterio.windows import Window
 import importlib
 import typing
 import warnings
+import slidingwindow
 from shapely.geometry import box
 from torchvision.ops import nms
 from deepforest import main, dataset, visualize, utilities
 from deepforest import predict as predict_utils
+import matplotlib.pyplot as plt
+import geopandas as gpd
+import base64
+import json
+import io
+from PIL import Image
 
 
-# used just if im_memory: False
+def convert_shapefile_to_geojson_with_rgb(shapefile_path, raster_path, save_dir):
+    """
+    Converts a Shapefile to GeoJSON format and embeds an RGB raster image as a background.
+
+    Args:
+        shapefile_path (str): Path to the input shapefile (.shp).
+        raster_path (str): Path to the raster image (.tif).
+        save_dir (str): Directory where the GeoJSON file should be saved.
+
+    Returns:
+        str: Path to the saved GeoJSON file.
+    """
+
+    # Ensure the save directory exists
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Load the shapefile
+    gdf = gpd.read_file(shapefile_path)
+
+    # Convert CRS to EPSG:4326 (WGS 84) for MLflow compatibility
+    if gdf.crs != "EPSG:4326":
+        print(f" Reprojecting from {gdf.crs} to EPSG:4326 (WGS 84)")
+        gdf = gdf.to_crs("EPSG:4326")
+
+    # Convert the geometries to GeoJSON format
+    features = json.loads(gdf.to_json())["features"]
+
+    # Convert raster image to Base64 PNG
+    with rasterio.open(raster_path) as src:
+        image_array = src.read([1, 2, 3])  # Read RGB bands
+        image_array = np.moveaxis(image_array, 0, -1)  # Convert to (H, W, C) format
+
+        # Convert array to image
+        img = Image.fromarray(image_array)
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    # Construct a GeoJSON FeatureCollection
+    geojson_data = {
+        "type": "FeatureCollection",
+        "properties": {
+            "image": f"data:image/png;base64,{img_base64}"
+        },
+        "features": features
+    }
+
+    # Define the GeoJSON file path
+    filename = os.path.splitext(os.path.basename(shapefile_path))[0]  # Extract filename without extension
+    geojson_path = os.path.join(save_dir, f"{filename}.geojson")
+
+    # Save GeoJSON with embedded RGB image
+    with open(geojson_path, "w") as f:
+        json.dump(geojson_data, f)
+
+    print(f" GeoJSON file with RGB background saved at: {geojson_path}")
+    return geojson_path
+
+
+def log_prediction_image(image_path, shapefile_path, save_dir):
+    """
+    Overlays the predicted bounding boxes on the raster image, saves it,
+    and logs both the preview image and the shapefile as GeoJSON in MLflow.
+
+    Args:
+        image_path (str): Path to the raster image.
+        shapefile_path (str): Path to the predicted shapefile.
+        save_dir (str): Directory to save outputs.
+
+    Returns:
+        None
+    """
+
+    # Ensure the save directory exists
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Convert Shapefile to GeoJSON with embedded RGB background
+    save_path_geojson = convert_shapefile_to_geojson_with_rgb(shapefile_path, image_path, save_dir)
+
+    # Log the GeoJSON file to MLflow
+    try:
+        mlflow.log_artifact(save_path_geojson, artifact_path="geojson")
+        print(f"GeoJSON file with RGB background logged to MLflow under 'geojson' (viewable in MLflow UI).")
+    except Exception as e:
+        print(f" Failed to log GeoJSON to MLflow: {e}")
+
+
+############
 class RasterDataset:
     """Dataset for predicting on raster windows.
 
@@ -87,27 +182,29 @@ class RasterDataset:
         return window_data  # Already in (C, H, W) format from rasterio
 
 
-# Merge predicted tiles:
+##############################
+
+
 def mosiac(boxes, windows, sigma=0.5, thresh=0.001, iou_threshold=0.1):
     """
     Merge predictions from overlapping windows by transforming their coordinates
     to the original system and applying Non-Max Suppression (NMS) to reduce duplicate detections.
-    
+
     Args:
-        boxes (list of pd.DataFrame): A list of DataFrames, where each DataFrame contains bounding box 
-            predictions from a single window. Each DataFrame should include columns `xmin`, `ymin`, `xmax`, `ymax`, 
+        boxes (list of pd.DataFrame): A list of DataFrames, where each DataFrame contains bounding box
+            predictions from a single window. Each DataFrame should include columns `xmin`, `ymin`, `xmax`, `ymax`,
             `label`, and `score`.
-        windows (list of rasterio.windows.Window): A list of windows representing the coordinates of the tiles 
+        windows (list of rasterio.windows.Window): A list of windows representing the coordinates of the tiles
             relative to the original image.
-        sigma (float): Variance of the Gaussian function used in Gaussian Soft NMS (if applicable). 
+        sigma (float): Variance of the Gaussian function used in Gaussian Soft NMS (if applicable).
             Currently unused in the implementation.
-        thresh (float): Confidence score threshold. Bounding boxes with scores below this threshold 
+        thresh (float): Confidence score threshold. Bounding boxes with scores below this threshold
             are removed after NMS is applied.
-        iou_threshold (float): Intersection-over-Union (IoU) threshold used during Non-Max Suppression 
+        iou_threshold (float): Intersection-over-Union (IoU) threshold used during Non-Max Suppression
             to filter overlapping bounding boxes. Lower values result in more aggressive suppression.
-    
+
     Returns:
-        pd.DataFrame: A DataFrame containing the filtered bounding boxes after NMS and score thresholding. 
+        pd.DataFrame: A DataFrame containing the filtered bounding boxes after NMS and score thresholding.
         The DataFrame includes the following columns:
             - `xmin`: Minimum x-coordinate of the bounding box.
             - `ymin`: Minimum y-coordinate of the bounding box.
@@ -115,23 +212,16 @@ def mosiac(boxes, windows, sigma=0.5, thresh=0.001, iou_threshold=0.1):
             - `ymax`: Maximum y-coordinate of the bounding box.
             - `label`: Class label of the detected object.
             - `score`: Confidence score of the detection.
-    
+
     Raises:
         ValueError: If the `boxes` or `windows` arguments are empty or have mismatched lengths.
-    
+
     Notes:
-        - This function assumes that the bounding box coordinates in each tile are relative 
-          to the tile's coordinate system. It adjusts these coordinates to the global image 
+        - This function assumes that the bounding box coordinates in each tile are relative
+          to the tile's coordinate system. It adjusts these coordinates to the global image
           coordinate system using the corresponding window offsets.
         - NMS is applied using PyTorch's torchvision.ops.nms function.
-    
-    Example:
-        >>> boxes = [pd.DataFrame({'xmin': [10], 'ymin': [20], 'xmax': [30], 'ymax': [40], 'label': [1], 'score': [0.95]})]
-        >>> windows = [rasterio.windows.Window(0, 0, 100, 100)]
-        >>> result = mosaic(boxes, windows, iou_threshold=0.5, thresh=0.8)
-        >>> print(result)
-           xmin  ymin  xmax  ymax  label  score
-        0    10    20    30    40      1   0.95
+
 """
     # Transform the coordinates to the original system
     for index, _ in enumerate(boxes):
@@ -148,7 +238,7 @@ def mosiac(boxes, windows, sigma=0.5, thresh=0.001, iou_threshold=0.1):
 
     # Move predictions to tensor
     boxes = torch.tensor(predicted_boxes[["xmin", "ymin", "xmax", "ymax"]].values,
-                          dtype=torch.float32)
+                         dtype=torch.float32)
     scores = torch.tensor(predicted_boxes.score.values, dtype=torch.float32)
     labels = predicted_boxes.label.values
 
@@ -165,10 +255,10 @@ def mosiac(boxes, windows, sigma=0.5, thresh=0.001, iou_threshold=0.1):
         np.expand_dims(new_labels, axis=1),
         np.expand_dims(new_scores, axis=1)
     ],
-                                      axis=1)
+        axis=1)
 
     mosaic_df = pd.DataFrame(image_detections,
-                              columns=["xmin", "ymin", "xmax", "ymax", "label", "score"])
+                             columns=["xmin", "ymin", "xmax", "ymax", "label", "score"])
 
     print(f"{mosaic_df.shape[0]} predictions kept after non-max suppression")
 
@@ -180,22 +270,22 @@ def mosiac(boxes, windows, sigma=0.5, thresh=0.001, iou_threshold=0.1):
 
 
 def predict_tile(
-    model_path,
-    raster_path=None,
-    image=None,
-    patch_size=400,
-    patch_overlap=0.05,
-    iou_threshold=0.15,
-    in_memory=True,
-    mosaic=True,
-    sigma=0.5,
-    thresh=0.001,
-    return_plot=False,
-    color=None,
-    thickness=1,
-    crop_model=None,
-    crop_transform=None,
-    crop_augment=False,
+        model_path,
+        raster_path=None,
+        image=None,
+        patch_size=400,
+        patch_overlap=0.1,  # reduce when large image
+        iou_threshold=0.15,
+        in_memory=True,
+        mosaic=True,
+        sigma=1.0,
+        thresh=0.001,
+        return_plot=False,
+        color=None,
+        thickness=1,
+        crop_model=None,
+        crop_transform=None,
+        crop_augment=False,
 ):
     """
     Predict bounding boxes for large images by dividing them into overlapping tiles, processing
@@ -296,6 +386,9 @@ def predict_tile(
             patch_size=patch_size,
         )
 
+    # new
+    model.config["batch_size"] = 1
+    model.config["num_workers"] = 2
     # Predict on tiles
     batched_results = model.trainer.predict(model, model.predict_dataloader(ds))
 
@@ -347,20 +440,16 @@ def predict_tile(
         return list(zip(results, crops))
 
 
-
-
-
-
-
 def predict_and_save_shapefile_with_transform(
-    model,
-    image_path,
-    small_tiles=True,
-    patch_size=400,
-    patch_overlap=0.25,
-    iou_threshold=0.1,
-    thresh=0.1,
-    savedir=None
+        model,
+        image_path,
+        output_name,
+        small_tiles=True,
+        patch_size=400,
+        patch_overlap=0.25,
+        iou_threshold=0.1,
+        thresh=0.1,
+        savedir=None
 ):
     """
     Predict bounding boxes and save them as a shapefile with the same CRS as the raster,
@@ -370,26 +459,33 @@ def predict_and_save_shapefile_with_transform(
     if small_tiles:
         # Predict using tiles
         predictions = predict_tile(
-                        model_path=model,
-                        raster_path=image_path,
-                        patch_size=patch_size,           # Size of each tile
-                        patch_overlap=patch_overlap,     # Overlap between tiles (25%)
-                        iou_threshold=iou_threshold,    # Intersection Over Union threshold for merging boxes
-                        return_plot=False,               # Set True to get an annotated image
-                        mosaic=True,
-                        sigma=0.5,
-                        thresh=thresh,
-                        color=(0, 255, 0),
-                        thickness=1,
-                        crop_model=None,
-                        crop_transform=None,
-                        crop_augment=False
-                    )
+            model_path=model,
+            raster_path=image_path,
+            patch_size=patch_size,  # Size of each tile
+            patch_overlap=patch_overlap,  # Overlap between tiles (25%)
+            iou_threshold=iou_threshold,  # Intersection Over Union threshold for merging boxes
+            return_plot=False,  # Set True to get an annotated image
+            mosaic=True,
+            sigma=0.5,
+            thresh=thresh,
+            color=(0, 255, 0),
+            thickness=1,
+            crop_model=None,
+            crop_transform=None,
+            crop_augment=False
+        )
+
+        print(predictions["score"].describe())
+
+        if predictions is None or predictions.empty:
+            print(f"No predictions for {image_path}. Skipping...")
+
+            return  # Skip to the next image
 
         print(predictions["score"].describe())
 
     else:
-        # Predict on the entire image
+
         predictions = model.predict_image(path=image_path)
 
     # Read the raster to get the CRS and affine transform
@@ -410,8 +506,8 @@ def predict_and_save_shapefile_with_transform(
 
     # Create a GeoDataFrame from the predictions and set CRS
     gdf = gpd.GeoDataFrame(
-        predictions, 
-        geometry=geometries, 
+        predictions,
+        geometry=geometries,
         crs=raster_crs  # Set CRS from the raster image
     )
 
@@ -419,28 +515,49 @@ def predict_and_save_shapefile_with_transform(
     if savedir:
         # Extract filename without extension
         filename = os.path.splitext(os.path.basename(image_path))[0]
-        output_path = os.path.join(savedir, f"{filename}_predictions.shp")
+        output_folder = os.path.join(savedir, f"{filename}_predictions")  # Create a folder for shapefile
+        os.makedirs(output_folder, exist_ok=True)  # Ensure the folder exists
+
+        output_path = os.path.join(output_folder, f"{filename}_prediction_{output_name}.shp")  # Save inside the folder
         gdf.to_file(output_path)
         print(f"Shapefile with predictions saved to {output_path}")
+
+        # Log a COPY of each shapefile instead of moving the folder
+        for file in os.listdir(output_folder):
+            file_path = os.path.join(output_folder, file)
+            if file.endswith((".shp", ".dbf", ".shx", ".prj", ".cpg")):
+                mlflow.log_artifact(file_path, artifact_path="shapefiles")
+
+        print(f" Shapefiles logged to MLflow without moving the original files.")
+
+        # Save and log overlayed image
+        # image_save_path = os.path.join(savedir, f"{filename}_preview.png")
+        # log_prediction_image(image_path, output_path, image_save_path)
     else:
         print("No directory specified to save the shapefile.")
 
-def process_all_tif_files_in_folder(model, folder_path, savedir, **kwargs):
+
+def process_all_tif_files_in_folder(model, file_path, output_name, savedir, run_name, **kwargs):
     """
     Process all TIFF files in a folder and save predictions as shapefiles with the same name.
+    Ensures MLflow uses a fixed run name.
     """
-    # List all files in the folder and filter out non-TIF files
-    tif_files = [f for f in os.listdir(folder_path) if f.endswith('.tif')]
+    # Start MLflow run with a fixed run name
+    with mlflow.start_run(run_name=run_name):
+        # List all files in the folder and filter out non-TIF files
+        tif_files = [f for f in os.listdir(file_path) if f.endswith('.tif')]
 
-    # Process each TIFF file
-    for tif_file in tif_files:
-        image_path = os.path.join(folder_path, tif_file)
-        print(f"Processing {image_path}...")
+        # Process each TIFF file
+        for tif_file in tif_files:
+            image_path = os.path.join(file_path, tif_file)
+            print(f"Processing {image_path}...")
 
-        # Call the prediction and saving function for each file
-        predict_and_save_shapefile_with_transform(
-            model=model,
-            image_path=image_path,
-            savedir=savedir,
-            **kwargs
-        )
+            # Call the prediction and saving function for each file
+            predict_and_save_shapefile_with_transform(
+                model=model,
+                image_path=image_path,
+                output_name="object_detection",
+                savedir=savedir,
+                **kwargs
+            )
+
