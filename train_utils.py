@@ -1,13 +1,12 @@
 import os
 import random
 import torch
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 from torchvision import transforms
 from deepforest.main import deepforest
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+import mlflow
+from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import (
     ModelCheckpoint,
@@ -15,41 +14,106 @@ from pytorch_lightning.callbacks import (
     LearningRateMonitor,
     Callback
 )
-from pytorch_lightning.loggers import TensorBoardLogger
 
-
-# Visualization Function
-def visualize_before_after(img_original, img_augmented, bboxes_original, bboxes_augmented):
+# -------------------------------
+# Helper Functions for MLflow
+# -------------------------------
+def ensure_directory_exists(path):
+    """Create directory if it does not exist."""
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+        print(f"Created missing directory: {path}")
+def mlflow_log_params(params_dict):
+    """Logs all hyperparameters to MLflow."""
+    for key, value in params_dict.items():
+        mlflow.log_param(key, value)
+def log_metrics_during_training(epoch, metrics):
     """
-    Visualize an image before and after augmentation along with bounding boxes.
-    """
-    fig, axes = plt.subplots(1, 2, figsize=(20, 10))
-    for ax, img, bboxes, title in zip(
-        axes,
-        [img_original, img_augmented],
-        [bboxes_original, bboxes_augmented],
-        ["Before Augmentation", "After Augmentation"]
-    ):
-        if isinstance(img, np.ndarray) and img.shape[0] == 3:
-            img = img.transpose(1, 2, 0)
-        elif isinstance(img, torch.Tensor) and img.shape[0] == 3:
-            img = img.permute(1, 2, 0).detach().cpu().numpy()
+    Logs all available training metrics at each epoch dynamically.
 
-        ax.imshow(img)
-        for box in bboxes:
-            x_min, y_min, x_max, y_max = box
-            rect = patches.Rectangle(
-                (x_min, y_min),
-                x_max - x_min,
-                y_max - y_min,
-                linewidth=2,
-                edgecolor="red",
-                facecolor="none",
-            )
-            ax.add_patch(rect)
-        ax.set_title(title)
-        ax.axis("off")
-    plt.show()
+    - Converts tensor values to Python floats before logging.
+    - Handles missing values safely.
+    - Logs every available metric from `trainer.callback_metrics`.
+    """
+
+    sanitized_metrics = {}
+    for key, value in metrics.items():
+        safe_key = key.replace("/", "_")  # Replace `/` with `_` to avoid MLflow issues
+
+        try:
+            if isinstance(value, torch.Tensor):
+                sanitized_metrics[safe_key] = value.item()  # Convert Tensor to float
+            elif isinstance(value, (int, float)):
+                sanitized_metrics[safe_key] = float(value)  # Ensure all values are float
+            else:
+                print(f"⚠️ Skipping {key}: Unsupported type {type(value)}")
+
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to process metric {key}. Skipping... Error: {e}")
+
+    #  Debugging: Print all available metrics for the epoch
+    print(f" Epoch {epoch} - Metrics Available: {list(metrics.keys())}")
+
+    #  Log all sanitized metrics to MLflow
+    try:
+        mlflow.log_metrics(sanitized_metrics, step=epoch)  # Log all metrics at once
+        print(f" Logged metrics for epoch {epoch}: {sanitized_metrics}")
+
+    except Exception as e:
+        print(f" Warning: Failed to log metrics for epoch {epoch}. Error: {e}")
+
+
+class MLFlowLoggingCallback(Callback):
+    """Logs all training & validation metrics to MLflow after each epoch and saves as a DataFrame at the end."""
+
+    def __init__(self):
+        super().__init__()
+        self.epoch_metrics = []  # Store all epoch metrics
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        """Logs training metrics at the end of each training epoch."""
+        metrics = trainer.callback_metrics  # Get metrics
+        epoch = trainer.current_epoch  # Get current epoch
+
+        epoch_metric_entry = {"epoch": epoch}
+
+        #  Extract & ensure values are stored correctly
+        for key in [
+            "train_classification", "train_bbox_regression", "train_loss",
+            "val_classification", "val_bbox_regression", "iou",
+            "map", "map_50", "map_75", "mar_100", "Tree_Recall", "Tree_Precision"
+        ]:
+            value = metrics.get(key, None)  # Use `.get()` to avoid missing keys
+
+            if isinstance(value, torch.Tensor):
+                value = value.item()  # Convert Tensor to float
+
+            epoch_metric_entry[key] = value if value is not None else 0  #  Replace NaN with 0
+
+        self.epoch_metrics.append(epoch_metric_entry)  # Store for later logging
+
+        #  Log per-epoch metrics to MLflow immediately
+        for key, value in epoch_metric_entry.items():
+            if key != "epoch":  # Avoid logging epoch number as metric
+                mlflow.log_metric(key, value, step=epoch)
+
+        print(f" MLflow: Logged metrics for epoch {epoch}")
+
+    def on_train_end(self, trainer, pl_module):
+        """Logs full training history to MLflow as a table at the end."""
+        try:
+            if self.epoch_metrics:
+                metrics_df = pd.DataFrame(self.epoch_metrics)
+
+                #  Ensure all columns exist & fill missing values with 0
+                metrics_df.fillna(0, inplace=True)
+
+                print(" Final training metrics table:")
+                #print(metrics_df)  # Debugging: Check table content
+                mlflow.log_table(data=metrics_df, artifact_file="training_metrics.json")
+                print(" Training Metrics Table Logged to MLflow.")
+        except Exception as e:
+            print(f" Failed to log training table: {e}")
 
 
 # Data Preprocessing
@@ -137,7 +201,10 @@ def initialize_model(args):
     model.config["validation"]["root_dir"] = os.path.dirname(args["val_csv"])
     model.config["batch_size"] = args["batch_size"]
     model.config["num_classes"] = args["num_classes"]  # Set the number of classes
+    #model.config["score_thresh"] = args["score_thresh"]
 
+
+    #  Assign Transforms
     model.train_transform = args.get("train_transform", None)
     model.val_transform = args.get("val_transform", None)
 
@@ -154,39 +221,27 @@ def initialize_model(args):
 
     # define monitor
     monitor_metric = args["monitor"]
-    mode = "min" if monitor_metric in ["val_classification"] else "max"
+    mode = "min" if monitor_metric in ["val_classification", "loss", "val_bbox_regression"] else "max"
     # Set learning rate scheduler
     model.scheduler = ReduceLROnPlateau(
         optimizer=model.optimizer,
         mode=mode,
-        patience= args["optimizer_patience"],
+        patience= 20, # args["optimizer_patience"],
         verbose=True,
     )
-
     return model
-
-# Custom Callbacks
-class IOULogger(Callback):
-    def on_validation_epoch_end(self, trainer, pl_module):
-        if "iou" in trainer.callback_metrics:
-            iou_value = trainer.callback_metrics["iou"]
-            if isinstance(iou_value, torch.Tensor):  # Check if it's a tensor
-                iou_value = iou_value.item()  # Convert tensor to float
-            print(f"[Epoch {trainer.current_epoch}] IoU: {iou_value} (Type: {type(iou_value)})")
-            assert isinstance(iou_value, float), "IoU metric must be a float."
-
-class LearningRateLogger(Callback):
-    def on_train_epoch_start(self, trainer, pl_module):
-        print(f"[Epoch {trainer.current_epoch}] Learning Rate: {trainer.optimizers[0].param_groups[0]['lr']}")
 
 # Initialize Trainer
 def initialize_trainer(args):
     """
     Initialize PyTorch Lightning trainer.
     """
-    logger = TensorBoardLogger(save_dir=args["tb_log_dir"])
+    # Ensure min_epochs does not exceed max_epochs
+    min_epochs = min(args.get("min_epochs", 1), args["epochs"])
+
     monitor = args["monitor"]
-    mode = "min" if monitor == "val_classification" else "max"
+    mode = "min" if monitor in ["val_classification", "loss", "val_bbox_regression"] else "max"
+    # logger = TensorBoardLogger("tb_logs", name="deepforest")
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=args["model_save_dir"],
@@ -195,7 +250,6 @@ def initialize_trainer(args):
         mode=mode,
         save_top_k=args["save_top_k"],
         verbose=True,
-        auto_insert_metric_name=False,
     )
 
     accelerator = 'gpu' if torch.cuda.is_available() else 'cpu'
@@ -203,22 +257,28 @@ def initialize_trainer(args):
     if args["early_stop"]:
         trainer = Trainer(
             max_epochs=args["epochs"],
-            check_val_every_n_epoch=None,
-            callbacks=[checkpoint_callback, IOULogger(), EarlyStopping(
+            min_epochs=min_epochs,
+            # check_val_every_n_epoch=args["check_val_every_n_epoch"],
+            callbacks=[checkpoint_callback, MLFlowLoggingCallback(), EarlyStopping(
                 monitor=monitor,
                 patience=args["optimizer_patience"],
                 verbose=True,
                 mode=mode
             ), LearningRateMonitor(logging_interval="step")],
-            logger=logger,
+            logger = TensorBoardLogger("tb_logs", name="deepforest"),
+            log_every_n_steps=50,
+            val_check_interval=1.0, # 0.25 Runs validation after completing 25% of the training epoch. or 'int' Runs validation every 10 training batches. recommend: "num of batches every epoch" num_of_batch in one epoch
+            check_val_every_n_epoch=None, # Perform a validation loop after every `N` training epochs
             devices=1,
             accelerator=accelerator,
             precision=16,
+            # gradient_clip_val=0.5,
         )
     else:
         trainer = Trainer(
             max_epochs=args["epochs"],
-            callbacks=[checkpoint_callback, IOULogger()],
+            min_epochs=min_epochs,
+            callbacks=[checkpoint_callback, MLFlowLoggingCallback()],
             val_check_interval=1.0, # 0.25 Runs validation after completing 25% of the training epoch. or 'int' Runs validation every 10 training batches.
             check_val_every_n_epoch=1, # Perform a validation loop after every `N` training epochs
             accelerator=accelerator,
