@@ -125,6 +125,7 @@ args_predict = {
     "output_name": "all_1"
 }
 
+
 # load the predict model
 def run_predict(args_predict):
     """
@@ -144,6 +145,7 @@ def run_predict(args_predict):
     logging.info(f"Using Model Version: {model_version}")
     mlflow.set_tag("model_version", model_version)
     mlflow.set_tag("model_uri", model_path)
+    mlflow.log_params(args_predict)
     # track number of files process
     num_images = len(os.listdir(args_predict["folder_path"]))
     mlflow.log_metric("num_images_predicted", num_images)
@@ -163,7 +165,7 @@ def run_predict(args_predict):
 
     process_all_tif_files_in_folder(
         model=model,
-        folder_path=args_predict["folder_path"],
+        file_path=args_predict["folder_path"],
         savedir=args_predict["savedir"],
         run_name=args_predict["run_name"],
         small_tiles=args_predict["small_tiles"],
@@ -173,6 +175,7 @@ def run_predict(args_predict):
         thresh=args_predict["thresh"],
         output_name=args_predict["output_name"]
     )
+
 
 # Define tasks
 split_raster = False
