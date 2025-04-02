@@ -89,35 +89,6 @@ def convert_shapefile_to_geojson_with_rgb(shapefile_path, raster_path, save_dir)
     return geojson_path
 
 
-def log_prediction_image(image_path, shapefile_path, save_dir):
-    """
-    Overlays the predicted bounding boxes on the raster image, saves it,
-    and logs both the preview image and the shapefile as GeoJSON in MLflow.
-
-    Args:
-        image_path (str): Path to the raster image.
-        shapefile_path (str): Path to the predicted shapefile.
-        save_dir (str): Directory to save outputs.
-
-    Returns:
-        None
-    """
-
-    # Ensure the save directory exists
-    os.makedirs(save_dir, exist_ok=True)
-
-    # Convert Shapefile to GeoJSON with embedded RGB background
-    save_path_geojson = convert_shapefile_to_geojson_with_rgb(shapefile_path, image_path, save_dir)
-
-    # Log the GeoJSON file to MLflow
-    try:
-        mlflow.log_artifact(save_path_geojson, artifact_path="geojson")
-        print(f"GeoJSON file with RGB background logged to MLflow under 'geojson' (viewable in MLflow UI).")
-    except Exception as e:
-        print(f" Failed to log GeoJSON to MLflow: {e}")
-
-
-############
 class RasterDataset:
     """Dataset for predicting on raster windows.
 
@@ -180,9 +151,6 @@ class RasterDataset:
         window_data = window_data / 255.0  # Normalize
 
         return window_data  # Already in (C, H, W) format from rasterio
-
-
-##############################
 
 
 def mosiac(boxes, windows, sigma=0.5, thresh=0.001, iou_threshold=0.1):
@@ -530,9 +498,6 @@ def predict_and_save_shapefile_with_transform(
 
         print(f" Shapefiles logged to MLflow without moving the original files.")
 
-        # Save and log overlayed image
-        # image_save_path = os.path.join(savedir, f"{filename}_preview.png")
-        # log_prediction_image(image_path, output_path, image_save_path)
     else:
         print("No directory specified to save the shapefile.")
 
@@ -542,22 +507,19 @@ def process_all_tif_files_in_folder(model, file_path, output_name, savedir, run_
     Process all TIFF files in a folder and save predictions as shapefiles with the same name.
     Ensures MLflow uses a fixed run name.
     """
-    # Start MLflow run with a fixed run name
-    with mlflow.start_run(run_name=run_name):
-        # List all files in the folder and filter out non-TIF files
-        tif_files = [f for f in os.listdir(file_path) if f.endswith('.tif')]
+    tif_files = [f for f in os.listdir(file_path) if f.endswith('.tif')]
 
-        # Process each TIFF file
-        for tif_file in tif_files:
-            image_path = os.path.join(file_path, tif_file)
-            print(f"Processing {image_path}...")
+    # Process each TIFF file
+    for tif_file in tif_files:
+        image_path = os.path.join(file_path, tif_file)
+        print(f"Processing {image_path}...")
 
-            # Call the prediction and saving function for each file
-            predict_and_save_shapefile_with_transform(
-                model=model,
-                image_path=image_path,
-                output_name="object_detection",
-                savedir=savedir,
-                **kwargs
-            )
+        # Call the prediction and saving function for each file
+        predict_and_save_shapefile_with_transform(
+            model=model,
+            image_path=image_path,
+            output_name="object_detection",
+            savedir=savedir,
+            **kwargs
+        )
 
