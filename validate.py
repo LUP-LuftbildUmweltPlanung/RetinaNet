@@ -41,12 +41,11 @@ def extract_model_version(model_path):
 
     return "Unknown"  # Return default if no version found
 
-
 def load_mlflow_model(model_uri):
     try:
         logging.info(f"🔍 Loading model from: {model_uri}")
 
-        if model_uri.startswith("models:/") or model_uri.endswith("/artifacts/models"):
+        if model_uri.startswith("runs:/") or model_uri.startswith("models:/"):
             logging.info("🔍 Fetching model from MLflow artifact store...")
             model = mlflow.pytorch.load_model(model_uri)
             trainer = Trainer(logger=False)
@@ -63,10 +62,10 @@ def load_mlflow_model(model_uri):
             return model
 
         else:
-            raise ValueError(f" Invalid model path: {model_uri}")
+            raise ValueError(f"❌ Invalid model URI or checkpoint: {model_uri}")
 
     except Exception as e:
-        logging.error(f" Failed to load model: {e}")
+        logging.error(f"❌ Failed to load model: {e}")
         return None
 
 
@@ -80,16 +79,11 @@ def run_evaluate(args_eval):
     model_version = extract_model_version(model_checkpoint_path)
     logging.info(f"Using Model Version: {model_version}")
 
-    # # Extract model ID safely
-    # path_parts = os.path.normpath(model_checkpoint_path).split(os.sep)
-    # if len(path_parts) < 2:
-    #     raise ValueError(f"Error extracting model ID: Path too short -> {model_checkpoint_path}")
-
     # Ensure "Evaluation_" is always prefixed before the run_name
     run_name = f"Evaluation_{args_eval.get('run_name', model_version)}"
     with mlflow.start_run(run_name=run_name):
         mlflow.log_params(args_eval)  # Log parameters
-        mlflow.log_param("model_version", model_version)  # Log extracted version
+
 
         # Determine evaluation CSV
         csv_file = args_eval["evaluation_csv"]
@@ -107,7 +101,7 @@ def run_evaluate(args_eval):
             mlflow.log_input(eval_dataset, context="evaluation")
             logging.info(" Evaluation dataset logged to MLflow.")
         except Exception as e:
-            logging.warning(f"⚠️ Could not log evaluation dataset: {e}")
+            logging.warning(f" Could not log evaluation dataset: {e}")
 
         # Retrieve the NMS threshold value from args_eval (default to 0.8 if not provided)
         nms_thresh = args_eval.get("nms_thresh", 0.05)
@@ -231,16 +225,5 @@ def run_evaluate(args_eval):
 
         logging.info(f"Evaluation results saved to: {results_csv_path}")
         logging.info(f"Overall metrics saved to: {overall_metrics_path}")
-
-        # Log artifacts to MLflow
-        if os.path.exists(results_csv_path):
-            mlflow.log_artifact(results_csv_path)
-        else:
-            logging.warning(f"Evaluation file {results_csv_path} not found, skipping MLflow logging.")
-
-        if os.path.exists(overall_metrics_path):
-            mlflow.log_artifact(overall_metrics_path)
-        else:
-            logging.warning(f"Metrics file {overall_metrics_path} not found, skipping MLflow logging.")
 
         logging.info("Evaluation pipeline completed.")
