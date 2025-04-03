@@ -22,7 +22,7 @@ A model for individual Tree Crown Delineation via Neural Networks in RGB or RGB-
 
 - `deepforest_main.py`: Runs the DeepForest model for tree detection.
 - `delineation_main.py`: Runs the UNet-based model for UNet_detection.
-
+- `Note` : to run the script with Mlflow please ask me for **mlflow_config** file
 ---
 
 ## Installation
