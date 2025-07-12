@@ -66,7 +66,6 @@ A model for individual Tree Crown Delineation via Neural Networks in RGB or RGB-
    conda create -n UNet python=3.11
    conda activate UNet
    conda install gdal pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
-   conda install -c conda-forge gdal=3.10
    pip install git+https://git@github.com/AWF-GAUG/TreeCrownDelineation.git
    cd ../ObjectDetection/environment
    pip install -r requirements_2.txt
