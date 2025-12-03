@@ -7,7 +7,7 @@ xarray==0.17
 rasterio==1.4.3
 rioxarray==0.15.0
 shapely==2.0.6
-gdal==3.10.0
+GDAL-3.4.3-cp311-cp311-win_amd64.whl
 scipy==1.15.0
 scikit-image==0.25.0
 hyperopt==0.2.7
