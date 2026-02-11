@@ -70,6 +70,16 @@ A model for individual Tree Crown Delineation via Neural Networks in RGB or RGB-
    cd ../ObjectDetection/environment
    pip install -r requirements_2.txt
    ```
+
+   For **UNet Detection** Linux:
+   ```bash
+   conda create -n UNet python=3.11
+   conda activate UNet
+   pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+   pip install git+https://git@github.com/AWF-GAUG/TreeCrownDelineation.git
+   cd ../ObjectDetection/environment
+   pip install -r requirements_2_linux.txt
+   ```
 ---
 
 ## Known Issues
