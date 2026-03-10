@@ -1,3 +1,4 @@
+
 import os
 import geopandas as gpd
 import pandas as pd
@@ -47,11 +48,11 @@ def stage2_compute_density(poly_out_5, density_out, cell_size=50):
     g["density"] = tmp.join(cell_counts, on=["gx", "gy"])["density"].to_numpy()
 
     low_th = float(pd.Series(g["density"]).quantile(0.33))
-    high_th = float(pd.Series(g["density"]).quantile(0.66))
+    med_th = float(pd.Series(g["density"]).quantile(0.55))
 
     g["density_class"] = np.where(
         g["density"] < low_th, "low",
-        np.where(g["density"] < high_th, "medium", "high")
+        np.where(g["density"] < med_th, "medium", "high")
     )
 
     safe_remove(density_out)
@@ -139,43 +140,45 @@ def replace_by_overlap(mask_gdf, polygons_gdf, label, batch_size=200_000):
 
 from shapely.ops import unary_union
 
-def stage3_merge_two_levels(density_out, poly_out_15, final_out):
+def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
 
-    print("\n=== STAGE 3: Two-level merge (min5 + min15) ===")
+    print("\n=== STAGE 3: Three-level merge (min5 + min10 + min15) ===")
 
     mask = gpd.read_file(density_out, layer=DENSITY_LAYER).to_crs(TARGET_CRS)
 
     high = mask[mask["density_class"] == "high"].copy()
-    rest = mask[mask["density_class"] != "high"].copy()
+    medium = mask[mask["density_class"] == "medium"].copy()
+    low = mask[mask["density_class"] == "low"].copy()
 
+    g10 = gpd.read_file(poly_out_10).to_crs(TARGET_CRS)
     g15 = gpd.read_file(poly_out_15).to_crs(TARGET_CRS)
 
-    print("High crowns:", len(high))
-    print("Medium+Low crowns:", len(rest))
+    print("High crowns (min5):", len(high))
+    print("Medium crowns (min10 candidates):", len(medium))
+    print("Low crowns (min15 candidates):", len(low))
 
     # --------------------------------------------------
-    # Replace geometry using your existing method
+    # Replace geometry
     # --------------------------------------------------
 
-    rest_final = replace_by_overlap(rest, g15, "MEDIUM+LOW → min15")
+    medium_final = replace_by_overlap(medium, g10, "MEDIUM → min10")
+    low_final = replace_by_overlap(low, g15, "LOW → min15")
 
     # --------------------------------------------------
-    # FAST overlap removal
+    # Remove overlaps with HIGH crowns
     # --------------------------------------------------
 
-    print("\nRemoving overlap with high crowns (chunked)...")
+    print("\nRemoving overlaps with HIGH crowns...")
 
-    sindex = high.sindex
-
+    sindex_high = high.sindex
     new_geoms = []
 
-    for i, geom in enumerate(rest_final.geometry):
+    for i, geom in enumerate(medium_final.geometry):
 
         if i % 50000 == 0:
-            print(f" processed {i:,}/{len(rest_final):,}")
+            print(f" processed {i:,}/{len(medium_final):,}")
 
-        # find nearby high crowns
-        candidates = list(sindex.intersection(geom.bounds))
+        candidates = list(sindex_high.intersection(geom.bounds))
 
         if not candidates:
             new_geoms.append(geom)
@@ -188,19 +191,49 @@ def stage3_merge_two_levels(density_out, poly_out_15, final_out):
         if not new_geom.is_empty:
             new_geoms.append(new_geom)
 
-    rest_final["geometry"] = new_geoms
+    medium_final["geometry"] = new_geoms
+    medium_final = medium_final.explode(index_parts=False).reset_index(drop=True)
+    medium_final = medium_final[medium_final.geometry.area > 1]
 
-    rest_final = rest_final.explode(index_parts=False).reset_index(drop=True)
+    # --------------------------------------------------
+    # Remove overlaps with HIGH + MEDIUM crowns
+    # --------------------------------------------------
 
-    rest_final = rest_final[rest_final.geometry.area > 1]
+    print("\nRemoving overlaps with HIGH + MEDIUM crowns...")
+
+    priority_union = unary_union(
+        list(high.geometry) + list(medium_final.geometry)
+    )
+
+    new_geoms = []
+
+    for i, geom in enumerate(low_final.geometry):
+
+        if i % 50000 == 0:
+            print(f" processed {i:,}/{len(low_final):,}")
+
+        new_geom = geom.difference(priority_union)
+
+        if not new_geom.is_empty:
+            new_geoms.append(new_geom)
+
+    low_final["geometry"] = new_geoms
+    low_final = low_final.explode(index_parts=False).reset_index(drop=True)
+    medium_final = medium_final[medium_final.geometry.area > 1]
+    low_final = low_final[low_final.geometry.area > 1]
 
     # --------------------------------------------------
     # Simplify
     # --------------------------------------------------
 
-    rest_final["geometry"] = rest_final.geometry.simplify(
+    medium_final["geometry"] = medium_final.geometry.simplify(
         tolerance=0.2,
-        preserve_topology=True # otherwise polygons can break or self-intersect.
+        preserve_topology=True
+    )
+
+    low_final["geometry"] = low_final.geometry.simplify(
+        tolerance=0.2,
+        preserve_topology=True
     )
 
     high["geometry"] = high.geometry.simplify(
@@ -213,7 +246,7 @@ def stage3_merge_two_levels(density_out, poly_out_15, final_out):
     # --------------------------------------------------
 
     final = gpd.GeoDataFrame(
-        pd.concat([high, rest_final], ignore_index=True),
+        pd.concat([high, medium_final, low_final], ignore_index=True),
         crs=TARGET_CRS
     )
 
@@ -226,6 +259,8 @@ def stage3_merge_two_levels(density_out, poly_out_15, final_out):
     )
 
     print("Saved final merged →", final_out)
+
+    print("Saved final merged →", final_out)
 if __name__ == "__main__":
     # Paths to input and output data
     tile_dirs = [
@@ -234,9 +269,10 @@ if __name__ == "__main__":
 
     for tile_dir in tile_dirs:
         poly_out_5 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min5")
-        poly_out_15 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min10_2")
-        density_out = os.path.join(tile_dir, "min5_with_density_new_param.sqlite")
-        final_out = os.path.join(tile_dir, "tree_crown_merged_final_new_param.sqlite")
+        poly_out_10 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min10_2")
+        poly_out_15 = os.path.join(tile_dir, "polygons_min15")
+        density_out = os.path.join(tile_dir, "min5_with_density_new_param_3.sqlite")
+        final_out = os.path.join(tile_dir, "tree_crown_merged_final_new_param_3.sqlite")
 
         print("\nProcessing directory:", tile_dir)
 
@@ -244,6 +280,6 @@ if __name__ == "__main__":
         stage2_compute_density(poly_out_5, density_out, cell_size=50)
 
         # Stage 3: Merge based on density classes
-        stage3_merge_two_levels(density_out, poly_out_15, final_out)
+        stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out)
 
     print("\n🎉 DONE")
