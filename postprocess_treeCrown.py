@@ -219,7 +219,6 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
 
     low_final["geometry"] = new_geoms
     low_final = low_final.explode(index_parts=False).reset_index(drop=True)
-    medium_final = medium_final[medium_final.geometry.area > 1]
     low_final = low_final[low_final.geometry.area > 1]
 
     # --------------------------------------------------
@@ -283,3 +282,4 @@ if __name__ == "__main__":
         stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out)
 
     print("\n🎉 DONE")
+
