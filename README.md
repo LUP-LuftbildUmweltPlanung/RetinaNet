@@ -24,6 +24,35 @@ A model for individual Tree Crown Delineation via Neural Networks in RGB or RGB-
 - `delineation_main.py`: Runs the UNet-based model for UNet_detection.
 - `Note` : to run the script with Mlflow please ask me for **mlflow_config** file
 ---
+## Post-Processing UNet_detection Workflow
+
+The DeepTree delineation can optionally be improved using a density-aware post-processing step. "postprocess_treeCrown.py"
+This step combines multiple crown segmentation outputs with different detection sensitivities to produce more consistent tree crowns.
+
+### 1. Run Crown Delineation Multiple Times
+
+To enable density-aware merging, the delineation script must be executed three times with different min_dist parameters:
+
+Run	Parameter	     Purpose
+1	   min_dist = 5	 Detects small trees and dense crowns
+2	   min_dist = 10	 Balanced detection
+3	   min_dist = 15	 Produces larger crowns for sparse forest
+
+### 2. Run the Post-Processing Script
+
+The post-processing script combines these three outputs using a density-based strategy.
+
+Classifies the landscape into three density classes:
+
+Density	Crown source
+High	      min5
+Medium	   min10
+Low	      min15
+
+### 3. Height Extraction (Optional)
+
+If a canopy height model (e.g., nDSM) is available, tree heights can be added using the script "postprocess_treeCrown_with_height.py". The script assigns a height to each crown polygon based on the 80th percentile of height values within the polygon, providing a robust estimate of tree height while reducing the influence of noise or outliers.
+
 
 ## Installation
 
