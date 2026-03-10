@@ -2,10 +2,11 @@
 import subprocess
 
 # Please define the Parameters:
-input_file = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\dop1.tif" #  the image which we want to predict
-output_file = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\output_file_last_script" # the output prediction folder (the last part the name of the file)
-model_path = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\Models\Unet-resnet18_epochs=209_lr=0.0001_width=224_bs=32_divby=255_custom_color_augs_k=2_jitted.pt" # path to the model
-save_prediction = r"N:\MnD\projects\2024_11_01_object_detection\TreeCrownDelineation-master\ndvi_map_last_script" # the name of ndvi file and whole path (the last part the name of the file)
+input_file = r"Path\to\tif.tif" #  the image which we want to predict
+output_file = r"Path\to\output\TreeCrown" # the output prediction folder (the last part the name of the file)
+model_path = r"Models\Unet-resnet18_epochs=209_lr=0.0001_width=224_bs=32_divby=255_custom_color_augs_k=2_jitted.pt" # path to the model
+save_prediction = r"Path\to\output\TreeCrown_ndvi" # the name of ndvi file and whole path (the last part the name of the file)
+
 
 # function to run inference file
 def run_inference(input_file, output_file, model_path, save_prediction, red_channel, nir_channel, divide_by,
@@ -57,8 +58,8 @@ def run_inference(input_file, output_file, model_path, save_prediction, red_chan
 
 if __name__ == "__main__":
     # Variables
-    input_file = input_file
-    output_file = output_file
+    input_file = tile_folder
+    output_file = output_folder
     model_path = model_path
     save_prediction = save_prediction
     red_channel = 0
@@ -66,12 +67,19 @@ if __name__ == "__main__":
     divide_by = 255
 
     additional_args = [
-        "--div", "255",         # Specify a division factor for input values (e.g., divide by 255 to normalize pixel values).
-        "--ndvi",               # Flag to calculate NDVI (Normalized Difference Vegetation Index) during processing.
-        "--sigmoid",            # Apply a sigmoid function to the predictions, typically used for scaling output probabilities.
-        "-a",                   # Enable additional processing or features (short flag for a specific script feature).
-        "-w", "512",            # Specify the output width for resampling or processing (e.g., 512 pixels wide).
-        "--simplify", "0.1"     # Simplify geometries or results with a specified tolerance (e.g., 0.1 for simplification).
+        "--div", "255",
+        "--ndvi",
+        "--sigmoid",
+        "-a",  # Test-Time Augmentation
+        "-w", "512",
+        "--simplify", "0.1",
+
+        "--min-dist", "10",  # allow closer tree peaks
+        "--label-threshold", "0.001",  # detect weaker crowns
+        "--binary-threshold", "0.01",
+
+        "--sigma", "1",  # less smoothing -> small trees
+        "--upsample", "1.5"  # improve small crown detection
     ]
 
     # run the function
