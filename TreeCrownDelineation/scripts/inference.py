@@ -172,20 +172,20 @@ if __name__ == '__main__':
     #                                "--nir 3 "
     #                                "-s 0.1 -b 0.1 -l 0.1 --sigma 5".split())
 
-    polygon_extraction_params = {"min_dist"          : args.min_dist,
-                                 "mask_exp"          : 2,
+    polygon_extraction_params = {"min_dist": args.min_dist,
+                                 "mask_exp": 2,
                                  "outline_multiplier": 5,
-                                 "dist_exp"          : 0.5,
-                                 "sigma"             : args.sigma,
-                                 "label_threshold"   : args.label_threshold,
-                                 "binary_threshold"  : args.binary_threshold,
-                                 "simplify"          : args.simplify
+                                 "dist_exp": 0.5,
+                                 "sigma": args.sigma,
+                                 "label_threshold": args.label_threshold,
+                                 "binary_threshold": args.binary_threshold,
+                                 "simplify": args.simplify
                                  }
 
     print("Loading model")
-    
+
     model_names = args.model
-    
+
     if len(model_names) == 1:
         model = torch.jit.load(args.model[0]).to(args.device)
     elif len(model_names) > 1:
@@ -201,7 +201,7 @@ if __name__ == '__main__':
 
     if args.upsample != 1:
         model = Sequential(UpsamplingBilinear2d(scale_factor=args.upsample), model, UpsamplingBilinear2d(
-                scale_factor=1. / args.upsample))
+            scale_factor=1. / args.upsample))
 
     if args.sigmoid:
         model = InferenceModel(model)  # apply sigmoid to mask and outlines, but not to distance transform
@@ -225,7 +225,7 @@ if __name__ == '__main__':
     nchunks = nchunks_h * nchunks_w
     print("Chunk size for processing: {} pixels".format(chunk_size))
 
-    #%%
+    # %%
     print("Starting processing...")
 
     polygons = []
@@ -242,7 +242,7 @@ if __name__ == '__main__':
                 idx = i * nchunks_w + j + 1
                 print("Loading chunk {}/{}".format(idx, nchunks))
                 t1 = time()
-                chunk = array[:, y:y + chunk_size, x:x + chunk_size].load()  #.transpose('y', 'x', 'band')
+                chunk = array[:, y:y + chunk_size, x:x + chunk_size].load()  # .transpose('y', 'x', 'band')
                 data = chunk.data
                 if args.divisor != 1:
                     data = data / args.divisor
@@ -260,7 +260,7 @@ if __name__ == '__main__':
                 result = utils.predict_on_array_cf(model,
                                                    data,
                                                    in_shape=(nbands + args.ndvi, args.width,
-                                                   args.width),
+                                                             args.width),
                                                    out_bands=3,
                                                    drop_border=16,
                                                    batchsize=args.batchsize,
@@ -286,7 +286,9 @@ if __name__ == '__main__':
                     utils.array_to_tif(result["prediction"].transpose(1, 2, 0),
                                        args.save_prediction + "_{}-{}.tif".format(y, x),
                                        transform=utils.xarray_trafo_to_gdal_trafo(chunk.attrs["transform"]),
-                                       crs=array.attrs["crs"])
+                                       crs=array.attrs["crs"],
+                                       creation_options=["BIGTIFF=YES", "TILED=YES", "COMPRESS=LZW"]
+                                       )
 
                 t4 = time()
 
