@@ -191,6 +191,7 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
         if not new_geom.is_empty:
             new_geoms.append(new_geom)
 
+    print("\nRemoving overlaps with MEDIUM crowns...")
     medium_final["geometry"] = new_geoms
     medium_final = medium_final.explode(index_parts=False).reset_index(drop=True)
     medium_final = medium_final[medium_final.geometry.area > 1]
@@ -199,7 +200,7 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
     # Remove overlaps with HIGH + MEDIUM crowns
     # --------------------------------------------------
 
-    print("\nRemoving overlaps with HIGH + MEDIUM crowns...")
+    print("\nRemoving overlaps with High crowns...")
 
     priority_union = unary_union(
         list(high.geometry) + list(medium_final.geometry)
@@ -281,5 +282,6 @@ if __name__ == "__main__":
         stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out)
 
     print("\n🎉 DONE")
+
 
 
