@@ -258,8 +258,7 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
     )
 
     print("Saved final merged →", final_out)
-
-    print("Saved final merged →", final_out)
+    
 if __name__ == "__main__":
     # Paths to input and output data
     tile_dirs = [
@@ -282,4 +281,5 @@ if __name__ == "__main__":
         stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out)
 
     print("\n🎉 DONE")
+
 
