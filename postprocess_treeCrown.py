@@ -6,7 +6,6 @@ import numpy as np
 from shapely.ops import unary_union
 from tqdm import tqdm  # Import tqdm for progress tracking
 
-
 # CRS used in your workflow
 TARGET_CRS = 25832
 DENSITY_LAYER = "tree_crown_min5_density"
@@ -59,6 +58,7 @@ def stage2_compute_density(poly_out_5, density_out, cell_size=50):
     g.to_file(density_out, driver="SQLite", layer=DENSITY_LAYER)
     print("Saved density mask →", density_out)
 
+
 def has_tile_seam(poly, max_straight=3, axis_tol=0.05):
     """
     Detect long straight edges typical for tile seams.
@@ -74,24 +74,28 @@ def has_tile_seam(poly, max_straight=3, axis_tol=0.05):
     for g in geoms:
         coords = list(g.exterior.coords)
 
-        for i in range(len(coords)-1):
+        for i in range(len(coords) - 1):
             x1, y1 = coords[i]
-            x2, y2 = coords[i+1]
+            x2, y2 = coords[i + 1]
 
-            length = ((x2-x1)**2 + (y2-y1)**2)**0.5
+            length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
 
             if length > max_straight:
-                if abs(x1-x2) < axis_tol or abs(y1-y2) < axis_tol:
+                if abs(x1 - x2) < axis_tol or abs(y1 - y2) < axis_tol:
                     return True
 
     return False
+
+
 # -------------------------------------------------------------------
 # Helper: replace geometry by best-overlap candidate
 # -------------------------------------------------------------------
-def replace_by_overlap(mask_gdf, polygons_gdf, label, batch_size=200_000):
+def replace_by_overlap(mask_gdf, polygons_gdf, label, batch_size=200_000, overlap_threshold=0.30):
     """
     For each polygon in mask_gdf, pick the polygon in polygons_gdf that has
-    the maximum intersection area with it. If nothing overlaps, keep original.
+    the maximum intersection area with it. If nothing overlaps, keep the original polygon.
+    After replacement, if the replaced polygon intersects with other small polygons
+    by more than overlap_threshold of the smaller polygon's area, remove the smaller polygon.
 
     batch_size controls memory (important for millions of features).
     """
@@ -125,11 +129,20 @@ def replace_by_overlap(mask_gdf, polygons_gdf, label, batch_size=200_000):
                 best_pos = areas.values.argmax()
                 best_geom = cands.iloc[best_pos].geometry
 
-                # check for tile seam artifact
+                # Keep the current replacement logic
+                new_geom.append(best_geom)
+
+                # After replacement, check for intersections with other smaller polygons
+                other_intersections = cands[cands.index != best_pos].intersection(best_geom)
+                overlap_with_others = any((other_intersections.area / geom.area) >= overlap_threshold)
+
+                if overlap_with_others:
+                    # Remove the small polygon if the overlap is significant
+                    new_geom[-1] = geom  # Replace with the original smaller polygon if overlap is > threshold
+
+                # Check for tile seam artifact
                 if has_tile_seam(best_geom):
-                    new_geom.append(geom)  # fallback to min5
-                else:
-                    new_geom.append(best_geom)
+                    new_geom[-1] = geom  # fallback to min5
 
         part.geometry = new_geom
         out_parts.append(part)
@@ -138,10 +151,11 @@ def replace_by_overlap(mask_gdf, polygons_gdf, label, batch_size=200_000):
 
     return gpd.GeoDataFrame(pd.concat(out_parts, ignore_index=True), crs=mask_gdf.crs)
 
+
 from shapely.ops import unary_union
 
-def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
 
+def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
     print("\n=== STAGE 3: Three-level merge (min5 + min10 + min15) ===")
 
     mask = gpd.read_file(density_out, layer=DENSITY_LAYER).to_crs(TARGET_CRS)
@@ -163,64 +177,6 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
 
     medium_final = replace_by_overlap(medium, g10, "MEDIUM → min10")
     low_final = replace_by_overlap(low, g15, "LOW → min15")
-
-    # --------------------------------------------------
-    # Remove overlaps with HIGH crowns
-    # --------------------------------------------------
-
-    print("\nRemoving overlaps with HIGH crowns...")
-
-    sindex_high = high.sindex
-    new_geoms = []
-
-    for i, geom in enumerate(medium_final.geometry):
-
-        if i % 50000 == 0:
-            print(f" processed {i:,}/{len(medium_final):,}")
-
-        candidates = list(sindex_high.intersection(geom.bounds))
-
-        if not candidates:
-            new_geoms.append(geom)
-            continue
-
-        local_union = unary_union(high.iloc[candidates].geometry)
-
-        new_geom = geom.difference(local_union)
-
-        if not new_geom.is_empty:
-            new_geoms.append(new_geom)
-
-    print("\nRemoving overlaps with MEDIUM crowns...")
-    medium_final["geometry"] = new_geoms
-    medium_final = medium_final.explode(index_parts=False).reset_index(drop=True)
-    medium_final = medium_final[medium_final.geometry.area > 1]
-
-    # --------------------------------------------------
-    # Remove overlaps with HIGH + MEDIUM crowns
-    # --------------------------------------------------
-
-    print("\nRemoving overlaps with High crowns...")
-
-    priority_union = unary_union(
-        list(high.geometry) + list(medium_final.geometry)
-    )
-
-    new_geoms = []
-
-    for i, geom in enumerate(low_final.geometry):
-
-        if i % 50000 == 0:
-            print(f" processed {i:,}/{len(low_final):,}")
-
-        new_geom = geom.difference(priority_union)
-
-        if not new_geom.is_empty:
-            new_geoms.append(new_geom)
-
-    low_final["geometry"] = new_geoms
-    low_final = low_final.explode(index_parts=False).reset_index(drop=True)
-    low_final = low_final[low_final.geometry.area > 1]
 
     # --------------------------------------------------
     # Simplify
@@ -259,19 +215,20 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
     )
 
     print("Saved final merged →", final_out)
-    
+
+
 if __name__ == "__main__":
     # Paths to input and output data
     tile_dirs = [
-        r"D:\DeepTree",  # Modify this with your correct directory
+        r"W:\_workspace\2025_11_21_ObjectDetection-Stable\2021_tiles\Adendorf\test",  # Modify this with your correct directory
     ]
 
     for tile_dir in tile_dirs:
-        poly_out_5 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min5")
-        poly_out_10 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min10_2")
-        poly_out_15 = os.path.join(tile_dir, "polygons_min15")
-        density_out = os.path.join(tile_dir, "min5_with_density_new_param_3.sqlite")
-        final_out = os.path.join(tile_dir, "tree_crown_merged_final_new_param_3.sqlite")
+        poly_out_5 = os.path.join(tile_dir, "polygons_min5")
+        poly_out_10 = os.path.join(tile_dir, "polygons_min15")
+        poly_out_15 = os.path.join(tile_dir, "polygons_min25")
+        density_out = os.path.join(tile_dir, "min5_with_density_new_param______________________-.sqlite")
+        final_out = os.path.join(tile_dir, "tree_crown_merged_final_new_param______________________.sqlite")
 
         print("\nProcessing directory:", tile_dir)
 
@@ -282,6 +239,5 @@ if __name__ == "__main__":
         stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out)
 
     print("\n🎉 DONE")
-
 
 
