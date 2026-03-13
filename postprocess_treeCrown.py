@@ -206,9 +206,12 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
         crs=TARGET_CRS
     )
 
+    # Remove duplicates based on the geometry
+    final_cleaned = final.drop_duplicates(subset='geometry')
+
     safe_remove(final_out)
 
-    final.to_file(
+    final_cleaned.to_file(
         final_out,
         driver="SQLite",
         layer=FINAL_LAYER
@@ -239,5 +242,6 @@ if __name__ == "__main__":
         stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out)
 
     print("\n🎉 DONE")
+
 
 
