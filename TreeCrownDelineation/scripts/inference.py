@@ -7,6 +7,9 @@ import traceback
 import xarray as xr
 import numpy as np
 import pickle
+from osgeo import osr
+import fiona.crs  
+from pyproj import CRS  
 from torch.nn import DataParallel
 from torch.nn import UpsamplingBilinear2d, Sequential
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -143,15 +146,54 @@ def get_parser():
                         help="Stride used when applying the network to the image.")
     return parser
 
+#
+# def get_crs(array):
+#     crs_ = array.attrs["crs"]
+#     if "epsg" in crs_:
+#         crs_ = crs.from_epsg(crs_.split(':')[-1])
+#     else:
+#         crs_ = crs.from_string(crs_)
+#     return crs_
 
-def get_crs(array):
-    crs_ = array.attrs["crs"]
-    if "epsg" in crs_:
-        crs_ = crs.from_epsg(crs_.split(':')[-1])
-    else:
-        crs_ = crs.from_string(crs_)
-    return crs_
 
+
+def get_crs(array, crs=None):
+    """
+    Get CRS from the dataset or the provided CRS parameter.
+    If no CRS is provided, attempt to extract it from the array.
+    If no CRS is found, return a default CRS (EPSG:25832).
+    """
+    # If a CRS is provided, use it
+    if crs:
+        # If CRS is provided as string (e.g., proj4 format), convert it
+        if isinstance(crs, str):
+            return CRS.from_string(crs)  # Use pyproj CRS
+        elif isinstance(crs, int):  # If it's an EPSG code
+            return CRS.from_epsg(crs)  # Use pyproj CRS
+        else:
+            raise ValueError("The provided crs argument must be a string (e.g., proj4 string) or integer (EPSG code).")
+
+    # Otherwise, attempt to extract CRS from the array's attributes
+    try:
+        crs_ = array.attrs.get("crs", None)  # Get CRS from array attributes
+
+        if crs_ is not None and "epsg" in crs_:
+            # If EPSG code is found, convert it to CRS using pyproj
+            crs_ = CRS.from_epsg(int(crs_.split(':')[-1]))
+        elif crs_ is not None:
+            # If CRS is in string format, attempt to parse it using Fiona
+            crs_ = fiona.crs.from_string(crs_)
+        else:
+            # If no CRS found, use a default CRS (EPSG:25832)
+            print("No CRS found in array, setting to EPSG:25832.")
+            crs_ = CRS.from_epsg(25832)  # Default CRS (using pyproj)
+        return crs_
+
+    except Exception as e:
+        print(f"Error occurred while retrieving CRS: {e}")
+        print("Setting CRS to EPSG:25832 as a fallback.")
+        crs_ = CRS.from_epsg(25832)  # Default CRS (using pyproj)
+        return crs_
 
 if __name__ == '__main__':
     args = get_parser().parse_args()
