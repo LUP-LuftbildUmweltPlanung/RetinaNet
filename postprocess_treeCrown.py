@@ -1,5 +1,3 @@
-
-
 import os
 import geopandas as gpd
 import pandas as pd
@@ -20,16 +18,13 @@ def safe_remove(path):
         except PermissionError:
             raise PermissionError(f"Cannot remove {path}. Close any program using it (e.g., QGIS).")
 
+
 # Function to check and remove small polygons based on overlap threshold
 def remove_small_polygons_based_on_overlap(gdf, overlap_threshold=0.3):
     """
     This function checks for overlaps between polygons in different density classes
     (low, medium, and high). If a small polygon overlaps by more than overlap_threshold,
     it will be removed.
-
-    :param gdf: The GeoDataFrame containing the polygons (with 'density_class' and 'geometry' columns)
-    :param overlap_threshold: The threshold for significant overlap (default is 30%)
-    :return: Updated GeoDataFrame with small polygons removed
     """
     # Initialize spatial index for efficient search
     sindex = gdf.sindex
@@ -42,35 +37,80 @@ def remove_small_polygons_based_on_overlap(gdf, overlap_threshold=0.3):
     medium_density_polygons = gdf[gdf['density_class'] == 'medium']
     high_density_polygons = gdf[gdf['density_class'] == 'high']
 
-    # Function to check and store overlaps
     def check_overlaps(source_gdf, target_gdf, source_label, target_label):
         for idx, source_geom in source_gdf.iterrows():
+
             source_poly = source_geom['geometry']
 
-            # Find candidate polygons that intersect with the source polygon
+            # 🔴 FIX 1: clean invalid geometry
+            if not source_poly.is_valid:
+                source_poly = source_poly.buffer(0)
+
+            # Find candidate polygons
             cand_idx = list(sindex.intersection(source_poly.bounds))
             if not cand_idx:
-                continue  # No candidates, skip this polygon
+                continue
 
-            # Ensure that cand_idx contains valid indices for target_gdf
             cand_idx = [i for i in cand_idx if i in target_gdf.index]
             if not cand_idx:
-                continue  # Skip if no valid candidates in target_gdf
+                continue
 
-            # Get the intersecting polygons from the target group
             cands = target_gdf.loc[cand_idx]
 
             for id_, candidate in cands.iterrows():
                 candidate_poly = candidate['geometry']
 
-                # Check if the source polygon intersects with the candidate polygon
-                if source_poly.intersects(candidate_poly):
-                    intersection = source_poly.intersection(candidate_poly)
-                    overlap_ratio = intersection.area / source_poly.area
+                # 🔴 FIX 2: clean invalid geometry
+                if not candidate_poly.is_valid:
+                    candidate_poly = candidate_poly.buffer(0)
 
-                    # If overlap is greater than the threshold, consider it for removal
-                    if overlap_ratio >= overlap_threshold:  # Threshold of 30% overlap
-                        overlap_results[source_label].append((source_geom['id'], candidate['id'], overlap_ratio))
+                try:
+                    if source_poly.intersects(candidate_poly):
+
+                        # 🔴 FIX 3: safe intersection
+                        intersection = source_poly.intersection(candidate_poly)
+
+                        # 🔴 FIX 4: correct overlap logic
+                        ratio_source = intersection.area / source_poly.area
+                        ratio_target = intersection.area / candidate_poly.area
+
+                        overlap_ratio = max(ratio_source, ratio_target)
+
+                        if overlap_ratio >= overlap_threshold:
+
+                            # 🔴 FIX 5: remove SMALLER polygon
+                            if source_poly.area < candidate_poly.area:
+                                remove_id = source_geom['id']
+                            else:
+                                remove_id = candidate['id']
+
+                            overlap_results[source_label].append((remove_id, overlap_ratio))
+
+                except Exception as e:
+                    print(f"Error processing intersection: {e}")
+
+                try:
+                    if source_poly.intersects(candidate_poly):
+                        intersection = source_poly.intersection(candidate_poly)
+
+                        # --- NEW: symmetric overlap ---
+                        ratio_source = intersection.area / source_poly.area
+                        ratio_target = intersection.area / candidate_poly.area # new
+
+                        overlap_ratio = max(ratio_source, ratio_target)
+
+                        # --- decide which polygon to remove ---
+                        if overlap_ratio >= overlap_threshold:
+
+                            if source_poly.area < candidate_poly.area:
+                                remove_id = source_geom['id']
+                            else:
+                                remove_id = candidate['id']
+
+                            overlap_results[source_label].append((remove_id, overlap_ratio))
+
+                except Exception as e:
+                    print(f"Error processing intersection: {e}")
 
     # Check overlaps between low and medium polygons
     check_overlaps(low_density_polygons, medium_density_polygons, 'low', 'medium')
@@ -86,19 +126,18 @@ def remove_small_polygons_based_on_overlap(gdf, overlap_threshold=0.3):
     # Iterate over the overlap results and add polygons to the removal list
     for label in ['low', 'medium', 'high']:
         for overlap in overlap_results[label]:
-            source_id, target_id, overlap_ratio = overlap
-            polygons_to_remove.append(target_id)  # Mark the smaller polygon for removal
+            remove_id, overlap_ratio = overlap
+            polygons_to_remove.append(remove_id)
 
     # Remove polygons in the removal list from the GeoDataFrame
     gdf_filtered = gdf[~gdf['id'].isin(polygons_to_remove)]
 
     return gdf_filtered
 
+
 def stage2_compute_density(poly_out_5, poly_out_10, poly_out_15,
                            density_out,
                            cell_size=20,
-                           low_th=40,
-                           med_th=140,
                            use_median=False):
 
     print("\n=== STAGE 2: Density Mask Creation (AVERAGE density) ===")
@@ -114,7 +153,6 @@ def stage2_compute_density(poly_out_5, poly_out_10, poly_out_15,
     density_tables = []
 
     for g in [g5, g10, g15]:
-
         cent = g.geometry.centroid
         cx = cent.x.to_numpy()
         cy = cent.y.to_numpy()
@@ -149,17 +187,22 @@ def stage2_compute_density(poly_out_5, poly_out_10, poly_out_15,
 
     base["density"] = tmp.join(
         density_df["density_avg"],
-        on=["gx","gy"]
+        on=["gx", "gy"]
     )["density_avg"].to_numpy()
+
+    # Calculate percentiles for classification
+    low_th = np.percentile(base["density"], 44)  # 33rd percentile
+    med_th = np.percentile(base["density"], 95)  # 66th percentile
 
     print("\nDensity statistics:")
     print(base["density"].describe())
 
-    print(f"\nThresholds:")
-    print("low <", low_th)
-    print("medium <", med_th)
-    print("high >=", med_th)
+    print(f"\nThresholds (percentiles):")
+    print(f"low < {low_th}")
+    print(f"medium < {med_th}")
+    print(f"high >= {med_th}")
 
+    # Use percentiles for density classification
     base["density_class"] = np.where(
         base["density"] < low_th, "low",
         np.where(base["density"] < med_th, "medium", "high")
@@ -202,6 +245,108 @@ def has_tile_seam(poly, max_straight=3, axis_tol=0.05):
                     return True
 
     return False
+
+
+def replace_seam_with_g10(final_gdf, g10_gdf, sindex, max_straight=3, axis_tol=0.05, overlap_threshold=0.3):
+    """
+    Detect polygons with tile seams in final_gdf and replace them with the best matching polygons from g10_gdf.
+    :param final_gdf: GeoDataFrame containing the final polygons.
+    :param g10_gdf: GeoDataFrame containing the polygons from g10.
+    :param sindex: Spatial index of g10_gdf for fast lookup.
+    :param max_straight: Maximum length to detect a straight edge typical for tile seams.
+    :param axis_tol: Tolerance to detect horizontal or vertical straight edges typical for tile seams.
+    :param overlap_threshold: Minimum overlap ratio for replacement.
+    :return: Updated GeoDataFrame with replaced polygons.
+    """
+
+    def has_tile_seam(poly, max_straight=max_straight, axis_tol=axis_tol):
+        """Detect long straight edges typical for tile seams."""
+        if poly is None or poly.is_empty:
+            return False
+
+        if poly.geom_type == "MultiPolygon":
+            geoms = poly.geoms
+        else:
+            geoms = [poly]
+
+        for g in geoms:
+            if g.is_empty:
+                continue
+
+            coords = list(g.exterior.coords)
+
+            for i in range(len(coords) - 1):
+                x1, y1 = coords[i]
+                x2, y2 = coords[i + 1]
+
+                length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+
+                if length > max_straight:
+                    if abs(x1 - x2) < axis_tol or abs(y1 - y2) < axis_tol:
+                        return True
+
+        return False
+
+    def get_best_overlap_geom(geom, polygons_gdf, sindex):
+        """Find the polygon in g10 with the maximum intersection area."""
+        cand_idx = list(sindex.intersection(geom.bounds))
+        if not cand_idx:
+            return None, None
+
+        cands = polygons_gdf.iloc[cand_idx]
+        inter = cands.intersection(geom)
+        areas = inter.area
+
+        if len(areas) == 0 or areas.max() <= 0:
+            return None, None
+
+        best_pos = areas.values.argmax()
+        best_row = cands.iloc[best_pos]
+        return best_row["id"], best_row.geometry
+
+    replaced_geoms = []
+
+    for _, row in tqdm(final_gdf.iterrows(), total=len(final_gdf)):
+        geom = row.geometry
+
+        # If no seam is detected, keep the original geometry
+        if not has_tile_seam(geom):
+            replaced_geoms.append(geom)
+            continue
+
+        # Find the best matching polygon from g10
+        g10_id, g10_geom = get_best_overlap_geom(geom, g10_gdf, sindex)
+
+        if g10_geom is None:
+            replaced_geoms.append(geom)
+            continue
+
+        # Replace the geometry with the best matching g10 geometry if a seam is detected
+        replaced_geoms.append(g10_geom)
+
+    # Create a new GeoDataFrame with replaced geometries
+    final_replaced_gdf = final_gdf.copy()
+    final_replaced_gdf["geometry"] = replaced_geoms
+
+    return final_replaced_gdf
+
+
+def get_best_overlap_geom(geom, polygons_gdf, sindex):
+    """Find the polygon in g10 with the maximum intersection area."""
+    cand_idx = list(sindex.intersection(geom.bounds))
+    if not cand_idx:
+        return None, None
+
+    cands = polygons_gdf.iloc[cand_idx]
+    inter = cands.intersection(geom)
+    areas = inter.area
+
+    if len(areas) == 0 or areas.max() <= 0:
+        return None, None
+
+    best_pos = areas.values.argmax()
+    best_row = cands.iloc[best_pos]
+    return best_row["id"], best_row.geometry
 
 
 # -------------------------------------------------------------------
@@ -261,9 +406,6 @@ def replace_by_overlap(mask_gdf, polygons_gdf, label, batch_size=200_000, overla
     return gpd.GeoDataFrame(pd.concat(out_parts, ignore_index=True), crs=mask_gdf.crs)
 
 
-
-
-
 def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
     print("\n=== STAGE 3: Three-level merge (min5 + min10 + min15) ===")
 
@@ -315,9 +457,14 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
         crs=TARGET_CRS
     )
 
+    print("Loading g10...")
+    g10_gdf = g10[["id", "geometry"]].copy().reset_index(drop=True)
+    g10_sindex = g10_gdf.sindex
+    final_gdf = replace_seam_with_g10(final, g10_gdf, g10_sindex)
+
     # Remove small polygons based on overlap
-    final_cleaned = remove_small_polygons_based_on_overlap(final, overlap_threshold=0.01)
-    #check_and_remove_overlap
+    final_cleaned = remove_small_polygons_based_on_overlap(final_gdf, overlap_threshold=0.2)
+
 
     # Remove duplicates based on the geometry
     final_cleaned_ = final_cleaned.drop_duplicates(subset='geometry')
@@ -332,6 +479,7 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
 
     print("Saved final merged →", final_out)
 
+
 if __name__ == "__main__":
     # Paths to input and output data
     tile_dirs = [
@@ -341,27 +489,22 @@ if __name__ == "__main__":
     for tile_dir in tile_dirs:
         poly_out_5 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min7")
         poly_out_10 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min15")
-        poly_out_15 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min20")
-        density_out = os.path.join(tile_dir, "min5_with_density_final_1.sqlite")
-        final_out = os.path.join(tile_dir, "tree_crown_merged_final_1.sqlite")
+        poly_out_15 = os.path.join(tile_dir, "D:\DeepTree\Frankfurt_2021_polygon_min17___________.sqlite")
+        density_out = os.path.join(tile_dir, "min5_with_density_final_1_buffer20_44_95_02_15_17.sqlite")
+        final_out = os.path.join(tile_dir, "tree_crown_merged_final_1_buffer20_44_95_02_15_17.sqlite")
 
         print("\nProcessing directory:", tile_dir)
 
-        # # Stage 2: Compute density (fast grid-based)
-        # stage2_compute_density(poly_out_5, density_out, cell_size=50)
-        #
         stage2_compute_density(
             poly_out_5,
             poly_out_10,
             poly_out_15,
             density_out,
-            cell_size=50
+            cell_size=20
         )
-        # Stage 3: Merge based on density classes
-        # stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out)
         stage3_merge_three_levels(
             density_out,
-            poly_out_5,
+            poly_out_10,
             poly_out_15,
             final_out
         )
