@@ -183,7 +183,7 @@ def zonal_percentile_tiled_hist(
                     transform=win_transform,
                     fill=0,
                     dtype="int32",
-                    all_touched=False,
+                    all_touched=True,
                 )
 
                 m = (pid_r > 0) & np.isfinite(arr)
@@ -422,15 +422,15 @@ if __name__ == "__main__":
     process_treecrowns_height_only(
         bdom_path=r"",   # leave empty if nDOM already exists
         dgm_path=r"",
-        crowns_path=r"D:\DeepTree\tree_crown_merged_final_4.sqlite",
+        crowns_path=r"D:\DeepTree\tree_crown_merged_final_1_buffer20_44_95_02_15_17_Final.sqlite",
         ndom_out=r"X:\Austausch\Shadi\2025_12_04_DeepTree\Stadtgrenze\Frankfurt_2021_nDSM_mosaic_1m.tif",
-        final_out=r"D:\DeepTree\crowns_final_Frankfurt_2021.gpkg",
-        height_raster_out=r"D:\DeepTree\crowns_final_Frankfurt_2021.tif",
-        percentile=80,
+        final_out=r"D:\DeepTree\crowns_final_Frankfurt_2021____.gpkg",
+        height_raster_out=r"D:\DeepTree\crowns_final_Frankfurt_2021____.tif",
+        percentile=95,
         height_clean=0.25,
         chunk_size=512,             # for height extraction
         hist_vmin=0.0,
         hist_vmax=60.0,
-        hist_step=1.0,
+        hist_step=0.25,
         rasterize_chunk_size=1024,  # for writing the height raster (larger is faster if RAM allows)
     )
