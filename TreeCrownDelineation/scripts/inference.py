@@ -7,19 +7,19 @@ import traceback
 import xarray as xr
 import numpy as np
 import pickle
-from osgeo import osr
-import fiona.crs  
-from pyproj import CRS  
 from torch.nn import DataParallel
 from torch.nn import UpsamplingBilinear2d, Sequential
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from time import time
 from fiona import crs
+import rasterio
+from fiona.crs import from_epsg, from_string
 from treecrowndelineation.modules import utils
 from treecrowndelineation.modules.indices import ndvi
 from treecrowndelineation.modules.postprocessing import extract_polygons
 from treecrowndelineation.model.inference_model import InferenceModel
 from treecrowndelineation.model.averaging_model import AveragingModel
+
 
 
 def get_parser():
@@ -146,54 +146,59 @@ def get_parser():
                         help="Stride used when applying the network to the image.")
     return parser
 
-#
-# def get_crs(array):
-#     crs_ = array.attrs["crs"]
-#     if "epsg" in crs_:
-#         crs_ = crs.from_epsg(crs_.split(':')[-1])
-#     else:
-#         crs_ = crs.from_string(crs_)
-#     return crs_
 
 
 
-def get_crs(array, crs=None):
+def get_crs(array, input_file=None, fallback_epsg=25832):
     """
-    Get CRS from the dataset or the provided CRS parameter.
-    If no CRS is provided, attempt to extract it from the array.
-    If no CRS is found, return a default CRS (EPSG:25832).
+    Return a Fiona-compatible CRS.
+    Priority:
+    1. raster file CRS via rasterio
+    2. xarray attrs["crs"]
+    3. fallback EPSG
     """
-    # If a CRS is provided, use it
-    if crs:
-        # If CRS is provided as string (e.g., proj4 format), convert it
-        if isinstance(crs, str):
-            return CRS.from_string(crs)  # Use pyproj CRS
-        elif isinstance(crs, int):  # If it's an EPSG code
-            return CRS.from_epsg(crs)  # Use pyproj CRS
-        else:
-            raise ValueError("The provided crs argument must be a string (e.g., proj4 string) or integer (EPSG code).")
 
-    # Otherwise, attempt to extract CRS from the array's attributes
+    # 1. Try raster file CRS
+    if input_file is not None:
+        try:
+            with rasterio.open(input_file) as src:
+                if src.crs is not None:
+                    epsg = src.crs.to_epsg()
+                    if epsg is not None:
+                        return from_epsg(epsg)
+
+                    wkt = src.crs.to_wkt()
+                    if wkt:
+                        try:
+                            return from_string(wkt)
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"Could not read CRS from raster file: {e}")
+
+    # 2. Try xarray attrs
     try:
-        crs_ = array.attrs.get("crs", None)  # Get CRS from array attributes
-
-        if crs_ is not None and "epsg" in crs_:
-            # If EPSG code is found, convert it to CRS using pyproj
-            crs_ = CRS.from_epsg(int(crs_.split(':')[-1]))
-        elif crs_ is not None:
-            # If CRS is in string format, attempt to parse it using Fiona
-            crs_ = fiona.crs.from_string(crs_)
-        else:
-            # If no CRS found, use a default CRS (EPSG:25832)
-            print("No CRS found in array, setting to EPSG:25832.")
-            crs_ = CRS.from_epsg(25832)  # Default CRS (using pyproj)
-        return crs_
-
+        crs_attr = array.attrs.get("crs", None)
+        if crs_attr is not None:
+            if isinstance(crs_attr, str):
+                crs_attr_low = crs_attr.lower()
+                if "epsg:" in crs_attr_low:
+                    epsg = int(crs_attr_low.split("epsg:")[-1])
+                    return from_epsg(epsg)
+                else:
+                    return from_string(crs_attr)
     except Exception as e:
-        print(f"Error occurred while retrieving CRS: {e}")
-        print("Setting CRS to EPSG:25832 as a fallback.")
-        crs_ = CRS.from_epsg(25832)  # Default CRS (using pyproj)
-        return crs_
+        print(f"Could not read CRS from xarray attrs: {e}")
+
+    # 3. Fallback
+    print(f"No valid CRS found. Setting fallback CRS to EPSG:{fallback_epsg}.")
+    return from_epsg(fallback_epsg)
+
+
+from fiona.crs import from_epsg
+
+def get_crs(array, input_file=None, fallback_epsg=25832):
+    return from_epsg(25832)
 
 if __name__ == '__main__':
     args = get_parser().parse_args()
@@ -363,7 +368,7 @@ if __name__ == '__main__':
         print("Post-processing time: {}s".format(int(postprocessing_time)))
         print("Saving as {}".format(args.output_file))
 
-        crs_ = get_crs(array)
+        crs_ = get_crs(array, input_file=args.input_file)
 
         utils.save_polygons(polygons,
                             args.output_file,
@@ -381,7 +386,7 @@ if __name__ == '__main__':
         print("Saving as {}".format(args.output_file))
         utils.save_polygons(polygons,
                             args.output_file,
-                            crs=get_crs(array))
+                            crs=get_crs(array, input_file=args.input_file))
         print("Errors were encountered during processing, see above. Polygons found so far have been saved.")
 
     except fiona.errors.CRSError as e:
