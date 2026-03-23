@@ -352,53 +352,76 @@ def get_best_overlap_geom(geom, polygons_gdf, sindex):
 # -------------------------------------------------------------------
 # Helper: replace geometry by best-overlap candidate
 # -------------------------------------------------------------------
-def replace_by_overlap(mask_gdf, polygons_gdf, label, batch_size=200_000, overlap_threshold=0.30):
+def replace_by_overlap(mask_gdf, polygons_gdf, label, batch_size=200_000):
     """
-    For each polygon in mask_gdf, pick the polygon in polygons_gdf that has
-    the maximum intersection area with it. If nothing overlaps, keep the original polygon.
-    After replacement, if the replaced polygon intersects with other small polygons
-    by more than overlap_threshold of the smaller polygon's area, remove the smaller polygon.
-
-    batch_size controls memory (important for millions of features).
+    For each polygon in mask_gdf, pick the polygon in polygons_gdf
+    with the maximum intersection area. Invalid geometries are repaired
+    with buffer(0) before intersection.
     """
     print(f"\n{label}: overlap-based geometry replacement (batched)")
 
-    polygons_gdf = polygons_gdf[["geometry"]].copy()
+    polygons_gdf = polygons_gdf[["geometry"]].copy().reset_index(drop=True)
     sindex = polygons_gdf.sindex
 
     out_parts = []
     n = len(mask_gdf)
 
-    # Using tqdm to track progress
     for start in tqdm(range(0, n, batch_size), desc="Processing Batches", unit="batch"):
         end = min(start + batch_size, n)
         part = mask_gdf.iloc[start:end].copy()
 
         new_geom = []
+
         for geom in part.geometry.values:
+            if geom is None or geom.is_empty:
+                new_geom.append(geom)
+                continue
+
+            # repair source geometry if invalid
+            if not geom.is_valid:
+                try:
+                    geom = geom.buffer(0)
+                except Exception:
+                    new_geom.append(geom)
+                    continue
+
             cand_idx = list(sindex.intersection(geom.bounds))
             if not cand_idx:
                 new_geom.append(geom)
                 continue
 
-            cands = polygons_gdf.iloc[cand_idx]
-            inter = cands.intersection(geom)
+            best_geom = geom
+            best_area = 0.0
 
-            areas = inter.area
-            if areas.max() <= 0:
-                new_geom.append(geom)
-            else:
-                best_pos = areas.values.argmax()
-                best_geom = cands.iloc[best_pos].geometry
+            for idx in cand_idx:
+                cand_geom = polygons_gdf.iloc[idx].geometry
 
-                # Keep the current replacement logic
-                new_geom.append(best_geom)
+                if cand_geom is None or cand_geom.is_empty:
+                    continue
 
-                # Check for tile seam artifact
-                if has_tile_seam(best_geom):
-                    new_geom[-1] = geom  # fallback to min5 if tile seam detected
+                # repair candidate geometry if invalid
+                if not cand_geom.is_valid:
+                    try:
+                        cand_geom = cand_geom.buffer(0)
+                    except Exception:
+                        continue
 
-        part.geometry = new_geom
+                try:
+                    if not geom.intersects(cand_geom):
+                        continue
+
+                    inter_area = geom.intersection(cand_geom).area
+
+                    if inter_area > best_area:
+                        best_area = inter_area
+                        best_geom = cand_geom
+
+                except Exception:
+                    continue
+
+            new_geom.append(best_geom)
+
+        part["geometry"] = new_geom
         out_parts.append(part)
 
         print(f"  processed {end:,}/{n:,}")
@@ -417,6 +440,9 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
 
     g10 = gpd.read_file(poly_out_10).to_crs(TARGET_CRS)
     g15 = gpd.read_file(poly_out_15).to_crs(TARGET_CRS)
+
+    g10["geometry"] = g10.geometry.buffer(0)
+    g15["geometry"] = g15.geometry.buffer(0)
 
     print("High crowns (min5):", len(high))
     print("Medium crowns (min10 candidates):", len(medium))
@@ -460,7 +486,12 @@ def stage3_merge_three_levels(density_out, poly_out_10, poly_out_15, final_out):
     print("Loading g10...")
     g10_gdf = g10[["id", "geometry"]].copy().reset_index(drop=True)
     g10_sindex = g10_gdf.sindex
-    final_gdf = replace_seam_with_g10(final, g10_gdf, g10_sindex)
+    final_gdf_1 = replace_seam_with_g10(final, g10_gdf, g10_sindex)
+
+    print("Loading g15...")
+    g15_gdf = g15[["id", "geometry"]].copy().reset_index(drop=True)
+    g15_sindex = g15_gdf.sindex
+    final_gdf = replace_seam_with_g10(final_gdf_1, g15_gdf, g15_sindex)
 
     # Remove small polygons based on overlap
     final_cleaned = remove_small_polygons_based_on_overlap(final_gdf, overlap_threshold=0.2)
@@ -489,9 +520,9 @@ if __name__ == "__main__":
     for tile_dir in tile_dirs:
         poly_out_5 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min7")
         poly_out_10 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min15")
-        poly_out_15 = os.path.join(tile_dir, "D:\DeepTree\Frankfurt_2021_polygon_min17___________.sqlite")
-        density_out = os.path.join(tile_dir, "min5_with_density_final_1_buffer20_44_95_02_15_17.sqlite")
-        final_out = os.path.join(tile_dir, "tree_crown_merged_final_1_buffer20_44_95_02_15_17.sqlite")
+        poly_out_15 = os.path.join(tile_dir, "Frankfurt_2021_polygon_min17_fixed.sqlite")
+        density_out = os.path.join(tile_dir, "min5_with_density_final_1_buffer20_44_95_02_15_17_Final.sqlite")
+        final_out = os.path.join(tile_dir, "tree_crown_merged_final_1_buffer20_44_95_02_15_17_Final.sqlite")
 
         print("\nProcessing directory:", tile_dir)
 
